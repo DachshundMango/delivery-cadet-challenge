@@ -1,0 +1,39 @@
+version: '3.8' # Docker Compose file version
+
+services: # Services to run
+  
+  # 1. Main Database (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: delivery_postgres
+    ports:
+      - "5432:5432" # my computer's port:docker's port
+    environment:
+      POSTGRES_USER: ${DB_USER} 
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # 2. Database Management Tool (PgAdmin)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: delivery_pgadmin
+    ports:
+      - "8080:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  postgres_data:

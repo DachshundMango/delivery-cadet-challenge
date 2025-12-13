@@ -1,0 +1,35 @@
+{
+  "sales_transactions": {
+    "pk": "transactionID",
+    "fks": [
+      {
+        "col": "customerID",
+        "ref_table": "sales_customers",
+        "ref_col": "customerID"
+      },
+      {
+        "col": "franchiseID",
+        "ref_table": "sales_franchises",
+        "ref_col": "franchiseID"
+      }
+    ]
+  },
+  "sales_customers": {
+    "pk": "customerID",
+    "fks": []
+  },
+  "sales_franchises": {
+    "pk": "franchiseID",
+    "fks": [
+      {
+        "col": "supplierID",
+        "ref_table": "sales_suppliers",
+        "ref_col": "supplierID"
+      }
+    ]
+  },
+  "sales_suppliers": {
+    "pk": "supplierID",
+    "fks": []
+  }
+}

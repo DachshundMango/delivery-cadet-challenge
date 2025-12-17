@@ -26,11 +26,7 @@ def get_engine():
         raise e
 
 def load_csv_to_db(file_path, table_name, engine):
-    """
-    CSV 파일을 읽어 DB에 적재하는 함수
-    조건 1: 'replace' 모드로 테이블이 있으면 덮어씌울 것.
-    조건 2: 인덱스 컬럼은 생성하지 말 것.
-    """
+    
     try:
         print(f"📂 Loading {table_name}...")
         df = pd.read_csv(file_path)

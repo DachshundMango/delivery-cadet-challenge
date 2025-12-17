@@ -20,14 +20,14 @@
 **목표:** 로컬 DB를 구축하고 재사용 가능한 데이터 로딩 스크립트 완성 [cite: 12, 13]
 
 * **12/12 - 12/14: 기술 스택 선정 및 환경 설정**
-    * [ ] DB 선택: MySQL (Docker 권장) 또는 PostgreSQL [cite: 69, 70]
+    * [0] DB 선택: MySQL (Docker 권장) 또는 PostgreSQL [cite: 69, 70]
     * [ ] LangGraph, LangSmith API 키 및 환경 변수 설정 [cite: 54, 55]
-    * [ ] GitHub 저장소 생성 및 `git init` [cite: 102]
+    * [0] GitHub 저장소 생성 및 `git init` [cite: 102]
 * **12/15 - 12/17: 데이터 로딩 스크립트 작성 (Part 1)**
-    * [ ] CSV 파일을 읽어 테이블을 생성(CREATE)하는 Python 스크립트 작성 [cite: 13, 14]
-    * [ ] Primary Key(PK) 및 Foreign Key(FK) 관계 정의 [cite: 15]
-    * [ ] 데이터 삽입(INSERT) 자동화 및 무결성 확인 [cite: 17]
-    * **Check:** 스크립트 실행 한 번으로 빈 DB에 스키마와 데이터가 완벽하게 로드되는가? [cite: 19]
+    * [0] CSV 파일을 읽어 테이블을 생성(CREATE)하는 Python 스크립트 작성
+    * [0] Primary Key(PK) 및 Foreign Key(FK) 관계 정의
+    * [0] 데이터 삽입(INSERT) 자동화 및 무결성 확인
+    * **Check:** 스크립트 실행 한 번으로 빈 DB에 스키마와 데이터가 완벽하게 로드되는가
 
 ### 2주차: LangGraph 에이전트 핵심 개발 (Core Logic)
 **목표:** 자연어 질문을 SQL로 변환하고 실행하는 LangGraph 에이전트 구현 [cite: 20]

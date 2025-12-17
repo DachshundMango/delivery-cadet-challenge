@@ -11,6 +11,8 @@ workflow.add_node("generate_response", generate_response)
 
 def check_query_validation(state: SQLAgentState) -> str:
     result = state['query_result']
+    if result is None:
+        return "retry"
     return "retry" if "Error" in result else "success"
 
 workflow.add_edge(START, "read_question")

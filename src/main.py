@@ -1,9 +1,9 @@
 from graph import app
 from pprint import pprint
 
-inputs = {"user_question": "전체 데이터 개수가 몇 개야?"}
+inputs = {"user_question": "What are the top 3 most popular products by total quantity sold?"}
 
-print("🚀 에이전트 출발! (Agent Started)\n")
+print("🚀 Agent starts! (Agent Started)\n")
 
 for output in app.stream(inputs):
     for key, value in output.items():
@@ -11,4 +11,4 @@ for output in app.stream(inputs):
         pprint(value)
         print("---")
 
-print("\n🏁 도착! (Finished)")
+print("\n🏁 Finished!")

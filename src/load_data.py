@@ -77,11 +77,11 @@ def add_foreign_key(keys, table_name, engine):
         ref_table = fk['ref_table']
         ref_col = fk['ref_col']
         
-        clean_sql = f'DELETE FROM "{table}" WHERE "{col}" NOT IN (SELECT "{ref_col}" FROM "{ref_table}")'
+        # clean_sql = f'DELETE FROM "{table}" WHERE "{col}" NOT IN (SELECT "{ref_col}" FROM "{ref_table}")'
         
         alter_sql = f'ALTER TABLE "{table}" ADD CONSTRAINT "{col}" FOREIGN KEY ("{col}") REFERENCES "{ref_table}"("{ref_col}")'
         with engine.connect() as conn:
-            conn.execute(text(clean_sql))
+            # conn.execute(text(clean_sql))
             conn.execute(text(alter_sql))
             conn.commit()
         print(f"Foreign key {table}.{col} -> {ref_table}")

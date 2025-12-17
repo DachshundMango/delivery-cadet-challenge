@@ -7,7 +7,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
 from sqlalchemy import create_engine, text
 
-llm = ChatGroq(model='llama-3.1-8b-instant')
+load_dotenv()
+
+llm = ChatGroq(model='llama-3.3-70b-versatile')
 
 def read_question(state: SQLAgentState) -> dict:
     
@@ -20,30 +22,59 @@ def generate_SQL(state: SQLAgentState) -> dict:
     user_question = state['user_question']
 
     schema_info = """
-    
     1. Table 'sales_transactions'
        - Primary Key: transactionID
-       - Foreign Keys: customerID -> sales_customers(customerID), franchiseID -> sales_franchises(franchiseID)
-       
+       - Foreign Keys: 
+         - customerID -> sales_customers(customerID)
+         - franchiseID -> sales_franchises(franchiseID)
+       - Columns: 
+         - transactionID (Integer)
+         - product (Text)  <-- ⭐ IMPORTANT: Use this for product names. There is NO 'productID'.
+         - quantity (Integer)
+         - unitPrice (Integer)
+         - totalPrice (Integer)
+         - paymentMethod (Text)
+         - dateTime (Text)
+         - cardNumber (BigInt)
+
     2. Table 'sales_customers'
        - Primary Key: customerID
-       
+       - Columns: 
+         - customerID (Integer)
+         - first_name (Text), last_name (Text)
+         - country (Text), continent (Text), city (Text), state (Text)
+         - gender (Text)
+
     3. Table 'sales_franchises'
        - Primary Key: franchiseID
-       - Foreign Keys: supplierID -> sales_suppliers(supplierID)
-       
+       - Foreign Keys:
+         - supplierID -> sales_suppliers(supplierID)
+       - Columns: 
+         - franchiseID (Integer)
+         - name (Text) <-- This is the Franchise Name
+         - city (Text), country (Text)
+         - size (Text)
+
     4. Table 'sales_suppliers'
        - Primary Key: supplierID
+       - Columns: 
+         - supplierID (Integer)
+         - name (Text) <-- This is the Supplier Name
+         - ingredient (Text)
+         - continent (Text), city (Text)
+         - approved (Text)
     """
 
     initial_prompt = f"""You are an expert data engineer.
-    Your goal is to convert user questions into valid SQL queries for a PostgreSQL database.
-    Here is the schema of the database:
+    Convert user questions into valid PostgreSQL queries.
+    
+    Here is the ACTUAL schema of the database:
     {schema_info}
+    
     Rules:
-    1. Return ONLY the SQL query.
-    2. Do not include markdown formatting (like ```sql).
-    3. Do not add explanations. 
+    1. Use ONLY the columns explicitly listed above. 
+    2. **CRITICAL**: The product column is named 'product', NOT 'productID'.
+    3. Return ONLY the SQL query string.
     """
     
     prompt_template = ChatPromptTemplate.from_messages([
@@ -57,9 +88,11 @@ def generate_SQL(state: SQLAgentState) -> dict:
     })
 
     response = llm.invoke(final_prompt_value)
-
+    
+    sql_query = response.content
+    sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
     return {
-        "sql_query": response.content
+        "sql_query": sql_query
     }
 
 def execute_SQL(state: SQLAgentState) -> dict:

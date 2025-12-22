@@ -15,6 +15,7 @@ class SQLAgentState(TypedDict):
 	"""
 
 	user_question: str
+	intent: str
 
 	sql_query: str | None
 	query_result: str | None

@@ -44,7 +44,6 @@ def add_primary_key(keys, table_name, engine):
         print(f"Skipped PK set for {table} - not in key configuration.")
         return
     
-    
     pk = keys[table]['pk']
     
     if not pk:

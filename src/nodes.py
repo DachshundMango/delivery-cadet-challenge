@@ -17,6 +17,57 @@ def read_question(state: SQLAgentState) -> dict:
         "messages": [HumanMessage(content=f"User question: {state['user_question']}")]
     }
 
+def intent_classification(state: SQLAgentState) -> dict:
+    
+    user_question = state['user_question']
+
+    intent_prompt = """Analyze the following input and classify it into one of two categories:
+
+    sql - If the user wants to fetch, count, analyze, or look up specific data from a database.
+    general - If the input is a greeting, a clarifying question, a coding request, or casual chat.
+
+    **Rules:**
+    - Even if the user does not use the word "SQL", if the intent requires data retrieval (e.g., "Who bought the most items?"), classify as [SQL].
+    - If the request is ambiguous but leans towards asking for information likely stored in a table, classify as [SQL].
+
+    **Output:**
+    Return ONLY the class label `sql` or `general`. Do not provide explanations."""
+    
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", "{intent_prompt}"),
+        ("human", "{user_question}")
+    ])
+
+    final_prompt_value = prompt_template.invoke({
+        "intent_prompt": intent_prompt,
+        "user_question": user_question
+    })
+
+    response = llm.invoke(final_prompt_value)
+    
+    intent = response.content
+    intent = intent.replace("'", "").strip()
+    return {
+        "intent": intent
+    }
+
+def generate_general_response(state: SQLAgentState) -> dict:
+    
+    user_question = state['user_question']
+
+    general_prompt = f"""You are a helpful data analyst assistant.
+    User said: "{user_question}"
+    
+    Respond politely. If they ask about your capability, say you can help analyze sales data.
+    """
+
+    response = llm.invoke(general_prompt)
+
+    return {
+        "messages": [response]
+    }
+
+
 def generate_SQL(state: SQLAgentState) -> dict:
     
     user_question = state['user_question']
@@ -29,7 +80,7 @@ def generate_SQL(state: SQLAgentState) -> dict:
          - franchiseID -> sales_franchises(franchiseID)
        - Columns: 
          - transactionID (Integer)
-         - product (Text)  <-- ⭐ IMPORTANT: Use this for product names. There is NO 'productID'.
+         - product (Text)  
          - quantity (Integer)
          - unitPrice (Integer)
          - totalPrice (Integer)
@@ -63,6 +114,27 @@ def generate_SQL(state: SQLAgentState) -> dict:
          - ingredient (Text)
          - continent (Text), city (Text)
          - approved (Text)
+
+    5. Table 'media_customer_reviews'
+       - Primary Key: new_id
+       - Foreign Keys:
+         - franchiseID -> sales_franchises(franchiseID)
+       - Columns: 
+         - new_id (Integer)
+         - review (Text) <-- The full text content of the customer review
+         - franchiseID (Integer)
+         - review_date (Text)
+
+    6. Table 'media_gold_reviews_chunked'
+       - Primary Key: chunk_id
+       - Foreign Keys:
+         - franchiseID -> sales_franchises(franchiseID)
+       - Columns: 
+         - chunk_id (Text)
+         - franchiseID (Integer)
+         - review_date (Text)
+         - chunked_text (Text) <-- Segmented or processed review text for analysis
+         - review_uri (Text)
     """
 
     initial_prompt = f"""You are an expert data engineer.
@@ -72,9 +144,10 @@ def generate_SQL(state: SQLAgentState) -> dict:
     {schema_info}
     
     Rules:
-    1. Use ONLY the columns explicitly listed above. 
-    2. **CRITICAL**: The product column is named 'product', NOT 'productID'.
-    3. Return ONLY the SQL query string.
+    1. Use ONLY the column names explicitly listed above. 
+    2. Return ONLY the SQL query string.
+    3. If a table or column name contains mixed case letters (camelCase), you MUST enclose it in double quotes.
+    4. Example: Do not write `SELECT paymentMethod ...`. Write `SELECT "paymentMethod" ...`.
     """
     
     prompt_template = ChatPromptTemplate.from_messages([

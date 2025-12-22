@@ -31,5 +31,25 @@
   "sales_suppliers": {
     "pk": "supplierID",
     "fks": []
+  }, 
+  "media_customer_reviews": {
+    "pk": "new_id",
+    "fks": [
+      {
+        "col": "franchiseID",
+        "ref_table": "sales_franchises",
+        "ref_col": "franchiseID"
+      }
+    ]
+  },
+  "media_gold_reviews_chunked": {
+    "pk": [],
+    "fks": [
+      {
+        "col": "franchiseID",
+        "ref_table": "sales_franchises",
+        "ref_col": "franchiseID"
+      }
+    ]
   }
 }

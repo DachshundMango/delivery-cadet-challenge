@@ -1,12 +1,11 @@
 {
-  "sales_transactions": {
-    "pk": "transactionID",
+  "sales_suppliers": {
+    "pk": "supplierID",
+    "fks": []
+  },
+  "media_gold_reviews_chunked": {
+    "pk": "chunk_id",
     "fks": [
-      {
-        "col": "customerID",
-        "ref_table": "sales_customers",
-        "ref_col": "customerID"
-      },
       {
         "col": "franchiseID",
         "ref_table": "sales_franchises",
@@ -28,10 +27,6 @@
       }
     ]
   },
-  "sales_suppliers": {
-    "pk": "supplierID",
-    "fks": []
-  }, 
   "media_customer_reviews": {
     "pk": "new_id",
     "fks": [
@@ -42,9 +37,14 @@
       }
     ]
   },
-  "media_gold_reviews_chunked": {
-    "pk": [],
+  "sales_transactions": {
+    "pk": "transactionID",
     "fks": [
+      {
+        "col": "customerID",
+        "ref_table": "sales_customers",
+        "ref_col": "customerID"
+      },
       {
         "col": "franchiseID",
         "ref_table": "sales_franchises",

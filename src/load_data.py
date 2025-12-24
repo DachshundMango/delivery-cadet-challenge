@@ -4,6 +4,7 @@ import json
 import pandas as pd
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from sqlalchemy.sql.elements import False_
 from sqlalchemy.sql.expression import table
 
 
@@ -36,54 +37,69 @@ def load_csv_to_db(file_path, table_name, engine):
     except Exception as e:
         print(f"❌ Error loading {table_name}: {e}")
 
-def add_primary_key(keys, table_name, engine):
-    
+def add_primary_key(keys, table_name, engine) -> bool:
+
     table = str(table_name)
-    
+
     if table not in keys:
         print(f"Skipped PK set for {table} - not in key configuration.")
-        return
-    
+        return False
+
     pk = keys[table]['pk']
-    
+
     if not pk:
         print(f"{table_name} does not have a primary key.")
-        return
+        return False
 
     sql = f'ALTER TABLE "{table}" ADD PRIMARY KEY ("{pk}")'
-    
-    with engine.connect() as conn:
-        conn.execute(text(sql))
-        conn.commit()
-    print(f"Primary key set for {table}")
 
-def add_foreign_key(keys, table_name, engine):
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(sql))
+            conn.commit()
+        print(f"Primary key set for {table}")
+        return False
+    except Exception as e:
+        print(f"Warning: Primary key {table}.{pk} is skipped.")
+        print(f" Reason: {str(e)[:100]}")
+        print(f" Table loaded without PK")
+        return True
+
+def add_foreign_key(keys, table_name, engine) -> bool:
 
     table = str(table_name)
     
     if table not in keys:
         print(f"Skipped FK set for {table} - not in key configuration.")
-        return
+        return False
     
     fks = keys[table]['fks']
 
+    failed = False
+
     if not fks:
         print(f"{table_name} does not have any foreign keys.")
-        return
+        return False
 
     for fk in fks:
         col = fk['col']
         ref_table = fk['ref_table']
         ref_col = fk['ref_col']
         
-        # clean_sql = f'DELETE FROM "{table}" WHERE "{col}" NOT IN (SELECT "{ref_col}" FROM "{ref_table}")'
-        
-        alter_sql = f'ALTER TABLE "{table}" ADD CONSTRAINT "{col}" FOREIGN KEY ("{col}") REFERENCES "{ref_table}"("{ref_col}")'
-        with engine.connect() as conn:
-            # conn.execute(text(clean_sql))
-            conn.execute(text(alter_sql))
-            conn.commit()
-        print(f"Foreign key {table}.{col} -> {ref_table}")
+        try:
+            sql = f'ALTER TABLE "{table}" ADD CONSTRAINT "{col}" FOREIGN KEY ("{col}") REFERENCES "{ref_table}"("{ref_col}")'
+            with engine.connect() as conn:
+                conn.execute(text(sql))
+                conn.commit()
+            print(f"Foreign key {table}.{col} -> {ref_table}")
+        except Exception as e:
+            failed = True
+            print(f"Warning: Foreign key {table}.{col} -> {ref_table} is skipped. Please recheck data file.")
+            print(f" Reason: {str(e)[:100]}")
+            print(f" Edit and run scripts/transform_data.py to fix")
+            continue
+
+    return failed
 
 def main():
     engine = get_engine()
@@ -101,18 +117,37 @@ def main():
     with open(keys_json, 'r', encoding='utf-8') as f:
         keys = json.load(f)
 
-    for file in files:
-        file_path = os.path.join(DATA_DIR, file)
-        file_name = os.path.basename(file_path)
-        table_name = file_name.replace('.csv','')
-        load_csv_to_db(file_path=file_path, table_name=table_name, engine=engine)
-        add_primary_key(keys=keys, table_name=table_name, engine=engine)
+    pk_failed = False
 
     for file in files:
         file_path = os.path.join(DATA_DIR, file)
         file_name = os.path.basename(file_path)
         table_name = file_name.replace('.csv','')
-        add_foreign_key(keys=keys, table_name=table_name, engine=engine)
+        load_csv_to_db(file_path=file_path, table_name=table_name, engine=engine)
+        result = add_primary_key(keys=keys, table_name=table_name, engine=engine)
+        if result:
+            pk_failed = True
+
+    fk_failed = False
+
+    for file in files:
+        file_path = os.path.join(DATA_DIR, file)
+        file_name = os.path.basename(file_path)
+        table_name = file_name.replace('.csv','')
+        result = add_foreign_key(keys=keys, table_name=table_name, engine=engine)
+        if result:
+            fk_failed = True
+    
+    if pk_failed or fk_failed:
+        print("\n" + "="*60)
+        if pk_failed:
+            print("⚠️  Primary key constraints failed")
+        if fk_failed:
+            print("⚠️  Foreign key constraints failed")
+        print("\nRun integrity checker for detailed diagnosis:")
+        print("  python src/integrity_checker.py")
+        print("="*60)
+
 
 if __name__ == "__main__":
     main()

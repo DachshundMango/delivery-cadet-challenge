@@ -15,3 +15,6 @@ __pycache__/
 
 # Generated data
 src/data_profile.json
+
+# LangGraph API
+.langgraph_api/

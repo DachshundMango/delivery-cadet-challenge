@@ -94,10 +94,25 @@ async def get_thread_history(thread_id: str):
     if thread_id not in threads_store:
         return []
 
-    # 스레드에 저장된 히스토리 반환 (배열 형식)
+    # 스레드에 저장된 히스토리 반환 (LangGraph SDK 형식)
     thread = threads_store[thread_id]
-    history = thread.get("history", [])
-    return history
+    messages = thread.get("history", [])
+
+    # SDK가 기대하는 형식으로 변환 (checkpoint 메타데이터 포함)
+    if messages:
+        return [{
+            "checkpoint": {
+                "checkpoint_id": str(uuid.uuid4())
+            },
+            "values": {
+                "messages": messages
+            },
+            "metadata": {
+                "source": "thread_history",
+                "thread_id": thread_id
+            }
+        }]
+    return []
 
 # 어시스턴트별 스레드 히스토리 조회
 @app.post("/assistants/{assistant_id}/threads/{thread_id}/history")
@@ -139,6 +154,7 @@ async def stream_run(thread_id: str, stream_input: StreamInput):
             all_messages = []
 
             # LangGraph 스트리밍
+            checkpoint_id = str(uuid.uuid4())
             for chunk in graph_app.stream(inputs):
                 for node_name, node_output in chunk.items():
                     # 메시지 변환 및 누적
@@ -162,6 +178,9 @@ async def stream_run(thread_id: str, stream_input: StreamInput):
                                 }
                                 all_messages.append(msg_obj)
 
+                    # 각 청크마다 새로운 checkpoint_id 생성
+                    checkpoint_id = str(uuid.uuid4())
+
                     # 값 이벤트 - LangGraph SDK 호환 형식 (누적된 메시지 전송)
                     values_data = {
                         "messages": all_messages,
@@ -173,23 +192,36 @@ async def stream_run(thread_id: str, stream_input: StreamInput):
                         if key in node_output:
                             values_data[key] = node_output[key]
 
-                    event_data = [
-                        "values",
-                        values_data
-                    ]
+                    # SSE 이벤트 - checkpoint 메타데이터 포함
+                    event_data = {
+                        "checkpoint": {
+                            "checkpoint_id": checkpoint_id
+                        },
+                        "values": values_data,
+                        "metadata": {
+                            "step": node_name,
+                            "writes": {}
+                        }
+                    }
 
-                    # SSE 형식으로 전송 (배열 형식)
+                    # SSE 형식으로 전송 (올바른 형식: event와 data 분리)
+                    yield f"event: values\n"
                     yield f"data: {json.dumps(event_data)}\n\n"
 
             # 완료 이벤트
-            end_event = ["end", None]
-            yield f"data: {json.dumps(end_event)}\n\n"
+            yield f"event: end\n"
+            yield f"data: {{}}\n\n"
+
+            # 스레드 히스토리에 최종 메시지 저장
+            if thread_id in threads_store:
+                threads_store[thread_id]["history"] = all_messages
+                threads_store[thread_id]["status"] = "idle"
 
         except Exception as e:
             import traceback
             traceback.print_exc()
-            error_event = ["error", {"message": str(e)}]
-            yield f"data: {json.dumps(error_event)}\n\n"
+            yield f"event: error\n"
+            yield f"data: {json.dumps({'message': str(e)})}\n\n"
 
     return StreamingResponse(
         event_generator(),

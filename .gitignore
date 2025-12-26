@@ -1,1 +1,17 @@
+# Archive
 archive/
+
+# Generated schema files
+src/schema_info.json
+src/schema_info.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+
+# Generated data
+src/data_profile.json

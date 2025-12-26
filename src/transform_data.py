@@ -59,18 +59,24 @@ def update_keys_from_db(engine):
       AND tc.table_schema = 'public';
     """
 
-    # Query for FKs
+    # Query for FKs (with proper join to avoid duplicates)
     fk_query = """
-    SELECT
-        tc.table_name,
+    SELECT DISTINCT
+        kcu.table_name,
         kcu.column_name,
         ccu.table_name AS ref_table,
         ccu.column_name AS ref_col
-    FROM information_schema.table_constraints AS tc
-    JOIN information_schema.key_column_usage AS kcu
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name
-    JOIN information_schema.constraint_column_usage AS ccu
-      ON ccu.constraint_name = tc.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.referential_constraints rc
+      ON tc.constraint_name = rc.constraint_name
+      AND tc.table_schema = rc.constraint_schema
+    JOIN information_schema.key_column_usage ccu
+      ON rc.unique_constraint_name = ccu.constraint_name
+      AND rc.unique_constraint_schema = ccu.table_schema
+      AND kcu.ordinal_position = ccu.ordinal_position
     WHERE tc.constraint_type = 'FOREIGN KEY'
       AND tc.table_schema = 'public';
     """
@@ -85,15 +91,18 @@ def update_keys_from_db(engine):
             pk_result = conn.execute(text(pk_query))
             pks = {row[0]: row[1] for row in pk_result}
 
-            # Get FKs
+            # Get FKs with deduplication
             fk_result = conn.execute(text(fk_query))
             fks = defaultdict(list)
             for row in fk_result:
-                fks[row[0]].append({
+                fk_entry = {
                     'col': row[1],
                     'ref_table': row[2],
                     'ref_col': row[3]
-                })
+                }
+                # Avoid duplicates
+                if fk_entry not in fks[row[0]]:
+                    fks[row[0]].append(fk_entry)
 
         # Build new keys config
         new_keys = {}

@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 from state import SQLAgentState
 from langchain.messages import HumanMessage, SystemMessage
@@ -9,7 +10,30 @@ from sqlalchemy import create_engine, text
 
 load_dotenv()
 
-llm = ChatGroq(model='llama-3.3-70b-versatile')
+#llm = ChatGroq(model='llama-3.3-70b-versatile')
+llm = ChatGroq(model='llama-3.1-8b-instant')
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.join(BASE_DIR, 'src')
+SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'schema_info.json')
+
+def get_db_engine():
+    """Create database engine"""
+    DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:5432/{os.getenv('DB_NAME')}"
+    return create_engine(DB_URL)
+
+def load_schema_info():
+    """Load pre-generated schema info from schema_info.json"""
+    if not os.path.exists(SCHEMA_JSON_PATH):
+        raise FileNotFoundError(
+            f"{SCHEMA_JSON_PATH} not found.\n"
+            "Please run: python src/generate_schema.py"
+        )
+
+    with open(SCHEMA_JSON_PATH, 'r', encoding='utf-8') as f:
+        schema_data = json.load(f)
+
+    return schema_data.get('llm_prompt', '')
 
 def read_question(state: SQLAgentState) -> dict:
     
@@ -69,73 +93,11 @@ def generate_general_response(state: SQLAgentState) -> dict:
 
 
 def generate_SQL(state: SQLAgentState) -> dict:
-    
+
     user_question = state['user_question']
 
-    schema_info = """
-    1. Table 'sales_transactions'
-       - Primary Key: transactionID
-       - Foreign Keys: 
-         - customerID -> sales_customers(customerID)
-         - franchiseID -> sales_franchises(franchiseID)
-       - Columns: 
-         - transactionID (Integer)
-         - product (Text)  
-         - quantity (Integer)
-         - unitPrice (Integer)
-         - totalPrice (Integer)
-         - paymentMethod (Text)
-         - dateTime (Text)
-         - cardNumber (BigInt)
-
-    2. Table 'sales_customers'
-       - Primary Key: customerID
-       - Columns: 
-         - customerID (Integer)
-         - first_name (Text), last_name (Text)
-         - country (Text), continent (Text), city (Text), state (Text)
-         - gender (Text)
-
-    3. Table 'sales_franchises'
-       - Primary Key: franchiseID
-       - Foreign Keys:
-         - supplierID -> sales_suppliers(supplierID)
-       - Columns: 
-         - franchiseID (Integer)
-         - name (Text) <-- This is the Franchise Name
-         - city (Text), country (Text)
-         - size (Text)
-
-    4. Table 'sales_suppliers'
-       - Primary Key: supplierID
-       - Columns: 
-         - supplierID (Integer)
-         - name (Text) <-- This is the Supplier Name
-         - ingredient (Text)
-         - continent (Text), city (Text)
-         - approved (Text)
-
-    5. Table 'media_customer_reviews'
-       - Primary Key: new_id
-       - Foreign Keys:
-         - franchiseID -> sales_franchises(franchiseID)
-       - Columns: 
-         - new_id (Integer)
-         - review (Text) <-- The full text content of the customer review
-         - franchiseID (Integer)
-         - review_date (Text)
-
-    6. Table 'media_gold_reviews_chunked'
-       - Primary Key: chunk_id
-       - Foreign Keys:
-         - franchiseID -> sales_franchises(franchiseID)
-       - Columns: 
-         - chunk_id (Text)
-         - franchiseID (Integer)
-         - review_date (Text)
-         - chunked_text (Text) <-- Segmented or processed review text for analysis
-         - review_uri (Text)
-    """
+    # Load pre-generated schema info
+    schema_info = load_schema_info()
 
     initial_prompt = f"""You are an expert data engineer.
     Convert user questions into valid PostgreSQL queries.
@@ -170,19 +132,14 @@ def generate_SQL(state: SQLAgentState) -> dict:
 
 def execute_SQL(state: SQLAgentState) -> dict:
 
-    load_dotenv()
-
-    DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:{5432}/{os.getenv('DB_NAME')}" 
-
-    engine = create_engine(DB_URL)
-
+    engine = get_db_engine()
     sql_query = state['sql_query']
 
     try:
         with engine.connect() as conn:
             result = conn.execute(text(sql_query))
             rows = result.fetchall()
-            return {"query_result": str(rows)} 
+            return {"query_result": str(rows)}
     except Exception as e:
         return {"query_result": f"Error: {str(e)}"}
 

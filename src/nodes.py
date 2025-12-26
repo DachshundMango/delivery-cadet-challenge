@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from dotenv import load_dotenv
 from state import SQLAgentState
 from langchain.messages import HumanMessage, SystemMessage
@@ -34,6 +35,15 @@ def load_schema_info():
         schema_data = json.load(f)
 
     return schema_data.get('llm_prompt', '')
+
+def mask_pii_in_query_result(sql_query: str, result_str: str) -> str:
+    """
+    Always apply name pattern matching, regardless of column names.
+    Dataset-agnostic approach.
+    """
+    # 조건 체크 없이 항상 패턴 매칭 적용
+    masked_result = re.sub(r"'([A-Z][a-z]+)'", "'[NAME_REDACTED]'", result_str)
+    return masked_result
 
 def read_question(state: SQLAgentState) -> dict:
     
@@ -139,27 +149,42 @@ def execute_SQL(state: SQLAgentState) -> dict:
         with engine.connect() as conn:
             result = conn.execute(text(sql_query))
             rows = result.fetchall()
-            return {"query_result": str(rows)}
+            result_str = str(rows)
+
+            # Apply PII masking to query results
+            masked_result = mask_pii_in_query_result(sql_query, result_str)
+
+            return {"query_result": masked_result}
     except Exception as e:
         return {"query_result": f"Error: {str(e)}"}
 
 def generate_response(state: SQLAgentState) -> dict:
-    
+
     question = state['user_question']
     sql = state['sql_query']
     result = state['query_result']
-    
+
     if "Error:" in result:
         return {"messages": [HumanMessage(content=f"An error ocurrs in query processing.\n{result}")]}
 
     response_prompt = f"""
     User asked: {question}
     SQL query used: {sql}
-    SQL Result: {result}    
-    Please answer the user's question using the SQL Result. 
+    SQL Result: {result}
+
+    **CRITICAL PRIVACY REQUIREMENT:**
+    - DO NOT include any personal names (first names, last names) in your response
+    - If the data contains [NAME_REDACTED], acknowledge that personal information has been protected for privacy
+    - Focus on aggregate statistics, counts, and trends rather than individual identities
+
+    Please answer the user's question using the SQL Result while respecting privacy.
     If the result is empty, say "No data found".
     """
-    
+
     response = llm.invoke(response_prompt)
-    
+
+    # Additional safety check: mask any names that might have slipped through (Defense in Depth)
+    final_response = re.sub(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b', '[NAME_REDACTED]', response.content)
+    response.content = final_response
+
     return {"messages": [response]}

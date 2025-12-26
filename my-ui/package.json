@@ -6,7 +6,8 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently \"turbo dev --filter=web\" \"turbo dev --filter=agents\"",
+    "dev": "turbo dev --filter=web",
+    "dev:all": "concurrently \"turbo dev --filter=web\" \"turbo dev --filter=agents\"",
     "build": "turbo build",
     "turbo:command": "turbo",
     "format": "turbo format",

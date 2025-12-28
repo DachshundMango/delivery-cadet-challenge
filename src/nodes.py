@@ -2,7 +2,7 @@ import os
 import json
 import re
 from dotenv import load_dotenv
-from state import SQLAgentState
+from src.state import SQLAgentState
 from langchain.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -47,9 +47,20 @@ def mask_pii_in_query_result(sql_query: str, result_str: str) -> str:
 
 def read_question(state: SQLAgentState) -> dict:
     
-    return {
-        "messages": [HumanMessage(content=f"User question: {state['user_question']}")]
-    }
+    messages = state.get("messages", [])
+
+    if messages:
+        last_message = messages[-1]
+        
+        if isinstance(last_message, dict):
+            content = last_message.get('content')
+        
+        else:
+            content = last_message.content
+        
+        return {"user_question": content}
+
+    return {}
 
 def intent_classification(state: SQLAgentState) -> dict:
     

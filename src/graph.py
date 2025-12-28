@@ -1,6 +1,6 @@
 from langgraph.graph import START, StateGraph, END
-from state import SQLAgentState
-from nodes import read_question, intent_classification, generate_SQL, execute_SQL, generate_general_response, generate_response
+from src.state import SQLAgentState
+from src.nodes import read_question, intent_classification, generate_SQL, execute_SQL, generate_general_response, generate_response
 
 workflow = StateGraph(SQLAgentState)
 

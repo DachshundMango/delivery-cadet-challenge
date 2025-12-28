@@ -14,8 +14,8 @@ class SQLAgentState(TypedDict):
 		3) BaseMessage: The parent class of HumanMessage, AIMessage, SystemMessage, ToolMessage
 	"""
 
-	user_question: str
-	intent: str
+	user_question: str | None
+	intent: str | None
 
 	sql_query: str | None
 	query_result: str | None

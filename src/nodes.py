@@ -163,9 +163,9 @@ def execute_SQL(state: SQLAgentState) -> dict:
             result_str = str(rows)
 
             # Apply PII masking to query results
-            masked_result = mask_pii_in_query_result(sql_query, result_str)
+            #masked_result = mask_pii_in_query_result(sql_query, result_str)
 
-            return {"query_result": masked_result}
+            return {"query_result": result_str} #후에 result_str -> masked_result 변경 필요
     except Exception as e:
         return {"query_result": f"Error: {str(e)}"}
 
@@ -183,19 +183,21 @@ def generate_response(state: SQLAgentState) -> dict:
     SQL query used: {sql}
     SQL Result: {result}
 
-    **CRITICAL PRIVACY REQUIREMENT:**
-    - DO NOT include any personal names (first names, last names) in your response
-    - If the data contains [NAME_REDACTED], acknowledge that personal information has been protected for privacy
-    - Focus on aggregate statistics, counts, and trends rather than individual identities
-
-    Please answer the user's question using the SQL Result while respecting privacy.
     If the result is empty, say "No data found".
     """
 
+
+    # **CRITICAL PRIVACY REQUIREMENT:** -> To be included in response_prompt above 
+    # - DO NOT include any personal names (first names, last names) in your response
+    # - If the data contains [NAME_REDACTED], acknowledge that personal information has been protected for privacy
+    # - Focus on aggregate statistics, counts, and trends rather than individual identities
+    # Please answer the user's question using the SQL Result while respecting privacy.
+    
+    
     response = llm.invoke(response_prompt)
 
     # Additional safety check: mask any names that might have slipped through (Defense in Depth)
-    final_response = re.sub(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b', '[NAME_REDACTED]', response.content)
-    response.content = final_response
+    # final_response = re.sub(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b', '[NAME_REDACTED]', response.content)
+    # response.content = final_response 
 
     return {"messages": [response]}

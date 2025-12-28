@@ -36,14 +36,14 @@ def load_schema_info():
 
     return schema_data.get('llm_prompt', '')
 
-def mask_pii_in_query_result(sql_query: str, result_str: str) -> str:
-    """
-    Always apply name pattern matching, regardless of column names.
-    Dataset-agnostic approach.
-    """
-    # 조건 체크 없이 항상 패턴 매칭 적용
-    masked_result = re.sub(r"'([A-Z][a-z]+)'", "'[NAME_REDACTED]'", result_str)
-    return masked_result
+# def mask_pii_in_query_result(sql_query: str, result_str: str) -> str:
+#     """
+#     Always apply name pattern matching, regardless of column names.
+#     Dataset-agnostic approach.
+#     """
+#     # 조건 체크 없이 항상 패턴 매칭 적용
+#     masked_result = re.sub(r"'([A-Z][a-z]+)'", "'[NAME_REDACTED]'", result_str)
+#     return masked_result
 
 def read_question(state: SQLAgentState) -> dict:
     
@@ -92,6 +92,7 @@ def intent_classification(state: SQLAgentState) -> dict:
     
     intent = response.content
     intent = intent.replace("'", "").strip()
+    
     return {
         "intent": intent
     }
@@ -168,6 +169,90 @@ def execute_SQL(state: SQLAgentState) -> dict:
             return {"query_result": result_str} #후에 result_str -> masked_result 변경 필요
     except Exception as e:
         return {"query_result": f"Error: {str(e)}"}
+
+def visualisation_request_classification(state: SQLAgentState) -> dict:
+    
+    user_question = state['user_question']
+    sql_result = state['query_result']
+
+    if state['intent'] == 'general' or \
+        ("Error:" in sql_result) or \
+        (sql_result in [None, '[]', '']):
+        return {
+        "plotly_data": None
+        }
+    
+    
+    visualisation_request_prompt = f"""
+    
+    You are a data visualisation expert. Analyze the user's question and SQL result to determine if visualisation is needed.
+
+    **Output Format (JSON only):**
+    {{
+    "visualise": "yes" or "no",
+    "chart_type": "bar" or "line" or "pie" or "scatter"
+    }}
+
+    **Chart Type Guidelines:**
+    - bar: Comparisons, rankings, top N items (e.g., "top 10 products", "sales by region")
+    - line: Time series, trends over time (e.g., "monthly revenue", "daily orders")
+    - pie: Proportions, percentages, composition (e.g., "market share", "distribution")
+    - scatter: Correlations, relationships between two variables (e.g., "price vs sales")
+
+    **Decision Rules:**
+    - If the question explicitly mentions "chart", "plot", "visualize", "visualise", "graph", or "show" → visualise: yes
+    - However, if the question explicitly denies or prohibits visualisation → visualise: no
+    - If SQL result has only 1 row or is a simple count → visualise: no
+    - If the question asks for comparisons, trends, or distributions → visualise: yes
+    - If the question only needs a single number or text answer → visualise: no
+    - If SQL result shows multiple data points (3+ rows) and involves aggregation → visualise: yes
+    
+    **IMPORTANT:**
+    - Return ONLY valid JSON
+    - No explanations, no additional text
+    - If unsure about chart_type, default to "bar"
+
+    The SQL query returned the following result:
+    {sql_result}
+    """
+    
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", visualisation_request_prompt),
+        ("human", "{user_question}")
+    ])
+
+    final_prompt_value = prompt_template.invoke({
+        "user_question": user_question
+    })
+
+    response = llm.invoke(final_prompt_value)
+    
+    try:
+        response_json = json.loads(response.content)
+    except Exception as e:
+        return {
+        "plotly_data": None
+        }
+    
+    if response_json['visualise'] == 'no':
+        return {
+        "plotly_data": None
+        }
+
+    chart_type = response_json['chart_type']
+
+    plotly_data = create_plotly_chart(
+        sql_result, 
+        chart_type
+    )
+
+    return {
+        "plotly_data": plotly_data.to_dict()
+    }
+
+def create_plotly_chart(sql_result, chart_type):
+    pass
+
 
 def generate_response(state: SQLAgentState) -> dict:
 

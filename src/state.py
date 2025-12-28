@@ -16,8 +16,10 @@ class SQLAgentState(TypedDict):
 
 	user_question: str | None
 	intent: str | None
-
+	
 	sql_query: str | None
 	query_result: str | None
-    
+
+	plotly_data: dict | None
+
 	messages: Annotated[List[BaseMessage], operator.add]

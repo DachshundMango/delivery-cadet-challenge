@@ -27,6 +27,15 @@ while True:
         for key, value in output.items():
             print(f"Node: {key}")
             #pprint(value)
+
+            # DEBUG: SQL 실행 결과 타입 확인
+            # if str(key) == "execute_SQL":
+            #     query_result = value.get('query_result')
+            #     print(f"\n=== DEBUG: execute_SQL output ===")
+            #     print(f"Raw query_result type: {type(query_result)}")
+            #     print(f"Raw query_result value: {query_result}")
+            #     print(f"=================================\n")
+
             if str(key) in  ["generate_response", "generate_general_response"]:
                 ai_message = value['messages'][-1].content
                 print(f"\nAgent answers:\n{ai_message}")

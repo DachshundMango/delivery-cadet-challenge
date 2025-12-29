@@ -12,6 +12,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Natural Language to SQL**: Converts user questions into valid PostgreSQL queries
 - **Intent Classification**: Intelligently routes between SQL-based queries and general conversation
 - **Automatic Query Retry**: Self-correcting mechanism for failed queries
+- **Data Visualization**: Automatic chart generation (bar, line, pie) using Plotly for visual data insights
 - **Conversational Interface**: ChatGPT-style UI for seamless user interaction
 - **Real-time Streaming**: Live response streaming through the web interface
 - **Dataset-Agnostic Design**: Easily adaptable to new datasets via metadata configuration
@@ -36,6 +37,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Groq**: High-performance LLM inference (llama-3.1-8b-instant)
 - **PostgreSQL 15**: Primary database
 - **SQLAlchemy**: Database ORM and query builder
+- **Plotly**: Interactive data visualization library
 - **FastAPI**: Web server (via LangGraph)
 - **LangSmith**: Execution trace visualization
 
@@ -45,7 +47,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **TypeScript**: Type safety
 - **Tailwind CSS 4**: Styling
 - **Radix UI**: Accessible component library
-- **Recharts**: Charting library
+- **Plotly.js & React-Plotly.js**: Interactive charting library
 - **Framer Motion**: Animations
 
 ### Infrastructure
@@ -280,16 +282,22 @@ cadet/
 [retry]   [success]
   │           │
   │           ▼
-  │     ┌───────────────┐
-  │     │generate_      │
-  │     │  response     │
-  │     └───────┬───────┘
-  │             │
-  └─────────────┤
-                ▼
-             ┌─────┐
-             │ END │
-             └─────┘
+  │     ┌──────────────────────────────┐
+  │     │visualisation_request_        │
+  │     │      classification          │  Determine if chart needed
+  │     └───────────┬──────────────────┘
+  │                 │
+  │                 ▼
+  │           ┌───────────────┐
+  │           │generate_      │
+  │           │  response     │
+  │           └───────┬───────┘
+  │                   │
+  └───────────────────┤
+                      ▼
+                   ┌─────┐
+                   │ END │
+                   └─────┘
 ```
 
 ### Key Components
@@ -297,8 +305,10 @@ cadet/
 1. **Intent Classification**: Determines if the user wants data (SQL) or conversation (general)
 2. **SQL Generation**: Uses LLM to convert natural language to PostgreSQL queries
 3. **Query Execution**: Runs SQL against the database and handles errors
-4. **Response Generation**: Converts SQL results into natural language
-5. **Retry Logic**: Automatically regenerates queries on errors
+4. **Visualization Request Classification**: Analyzes query results and determines if visual representation is needed
+5. **Chart Generation**: Creates interactive Plotly charts (bar, line, pie) from SQL results
+6. **Response Generation**: Converts SQL results into natural language
+7. **Retry Logic**: Automatically regenerates queries on errors
 
 ### Dataset-Agnostic Design
 
@@ -398,8 +408,8 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 
 ### Current Limitations
 
-1. **No Visualization**: Cannot generate charts or plots for query results
-   - Hard/Expert difficulty questions requesting visualizations are not fully supported
+1. **Limited Chart Types**: Currently supports only bar, line, and pie charts
+   - Scatter plots, heatmaps, and other advanced visualizations not yet implemented
 
 2. **No Python Execution**: Cannot perform advanced data analysis or transformations beyond SQL
    - Limited to SQL capabilities only
@@ -416,9 +426,10 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 
 ### Planned Improvements
 
-1. **Plotly Integration**: Add plotting tool to generate visualizations from SQL results
-   - Backend generates Plotly charts as images or JSON
-   - Frontend renders charts using Recharts or Plotly.js
+1. **Advanced Visualizations**: Expand chart types beyond bar, line, and pie
+   - Scatter plots, heatmaps, box plots, histograms
+   - Multi-axis and combination charts
+   - Customizable chart styling and themes
 
 2. **Pyodide Integration**: Enable in-browser Python execution
    - Allow pandas, numpy operations on query results

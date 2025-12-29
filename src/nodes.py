@@ -1,3 +1,4 @@
+import ast
 import os
 import json
 import re
@@ -8,6 +9,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
 from sqlalchemy import create_engine, text
+import plotly.express as px
 
 load_dotenv()
 
@@ -113,7 +115,6 @@ def generate_general_response(state: SQLAgentState) -> dict:
         "messages": [response]
     }
 
-
 def generate_SQL(state: SQLAgentState) -> dict:
 
     user_question = state['user_question']
@@ -182,7 +183,6 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         "plotly_data": None
         }
     
-    
     visualisation_request_prompt = f"""
     
     You are a data visualisation expert. Analyze the user's question and SQL result to determine if visualisation is needed.
@@ -190,14 +190,13 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
     **Output Format (JSON only):**
     {{
     "visualise": "yes" or "no",
-    "chart_type": "bar" or "line" or "pie" or "scatter"
+    "chart_type": "bar" or "line" or "pie"
     }}
 
     **Chart Type Guidelines:**
     - bar: Comparisons, rankings, top N items (e.g., "top 10 products", "sales by region")
     - line: Time series, trends over time (e.g., "monthly revenue", "daily orders")
     - pie: Proportions, percentages, composition (e.g., "market share", "distribution")
-    - scatter: Correlations, relationships between two variables (e.g., "price vs sales")
 
     **Decision Rules:**
     - If the question explicitly mentions "chart", "plot", "visualize", "visualise", "graph", or "show" → visualise: yes
@@ -251,7 +250,45 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
     }
 
 def create_plotly_chart(sql_result, chart_type):
-    pass
+    
+    try:
+        sql_list = ast.literal_eval(sql_result)
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+    if not sql_list:
+        return None
+    
+    x_data = []
+    y_data = []
+    
+    for data in sql_list:
+
+        x_string_parts = [x for x in data[:-1] if type(x) == str]
+
+        if x_string_parts:
+            x_label = ' '.join(x_string_parts)
+        else:
+            x_label = data[0]
+        
+        y_label = data[-1]
+
+        x_data.append(x_label)
+        y_data.append(y_label)
+
+    # Chart generation
+    if chart_type == "bar":
+        fig = px.bar(x=x_data, y=y_data, text=y_data, color=x_data)
+    elif chart_type == "line":
+        fig = px.line(x=x_data, y=y_data, markers=True)
+    elif chart_type == "pie":
+        fig = px.pie(names=x_data, values=y_data, hole=0.3)
+    else:
+        # Fallback to bar chart for unknown types
+        fig = px.bar(x=x_data, y=y_data)
+
+    return fig
 
 
 def generate_response(state: SQLAgentState) -> dict:

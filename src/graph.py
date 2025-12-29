@@ -1,6 +1,6 @@
 from langgraph.graph import START, StateGraph, END
 from src.state import SQLAgentState
-from src.nodes import read_question, intent_classification, generate_SQL, execute_SQL, generate_general_response, generate_response
+from src.nodes import read_question, intent_classification, generate_SQL, execute_SQL, generate_general_response, generate_response, visualisation_request_classification
 
 workflow = StateGraph(SQLAgentState)
 
@@ -17,9 +17,9 @@ workflow.add_node("read_question", read_question)
 workflow.add_node("intent_classification", intent_classification)
 workflow.add_node("generate_SQL", generate_SQL)
 workflow.add_node("execute_SQL", execute_SQL)
+workflow.add_node("visualisation_request_classification", visualisation_request_classification)
 workflow.add_node("generate_response", generate_response)
 workflow.add_node("generate_general_response", generate_general_response)
-
 
 workflow.add_edge(START, "read_question")
 workflow.add_edge("read_question", "intent_classification")
@@ -35,8 +35,9 @@ workflow.add_edge("generate_SQL", "execute_SQL")
 workflow.add_conditional_edges(
     "execute_SQL", 
     check_query_validation, 
-    {"retry":"generate_SQL", "success": "generate_response"}
+    {"retry":"generate_SQL", "success": "visualisation_request_classification"}
 )
+workflow.add_edge("visualisation_request_classification", "generate_response")
 
 workflow.add_edge("generate_response", END)
 workflow.add_edge("generate_general_response", END)

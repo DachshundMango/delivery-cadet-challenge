@@ -48,18 +48,30 @@ def load_schema_info():
 #     return masked_result
 
 def read_question(state: SQLAgentState) -> dict:
-    
+
     messages = state.get("messages", [])
 
     if messages:
         last_message = messages[-1]
-        
+
         if isinstance(last_message, dict):
             content = last_message.get('content')
-        
         else:
             content = last_message.content
-        
+
+        # Handle multimodal content (list of content blocks)
+        if isinstance(content, list):
+            # Extract text from first text content block
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'text':
+                    content = block.get('text', '')
+                    break
+                elif isinstance(block, str):
+                    content = block
+                    break
+            else:
+                content = str(content[0]) if content else ''
+
         return {"user_question": content}
 
     return {}
@@ -220,18 +232,11 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
 
     The SQL query returned the following result:
     {sql_result}
+
+    User Question: {user_question}
     """
-    
-    prompt_template = ChatPromptTemplate.from_messages([
-        ("system", visualisation_request_prompt),
-        ("human", "{user_question}")
-    ])
 
-    final_prompt_value = prompt_template.invoke({
-        "user_question": user_question
-    })
-
-    response = llm.invoke(final_prompt_value)
+    response = llm.invoke(visualisation_request_prompt)
     
     try:
         response_json = json.loads(response.content)
@@ -326,10 +331,20 @@ def create_plotly_chart(sql_result, chart_type):
     })
 
 def pyodide_request_classification(state: SQLAgentState) -> dict:
-    
+
     user_question = state['user_question']
 
-    pyodide_keywords = ['correlation', 'statistics', 'analyze', 'describe', 'summary', 'std', 'mean', 'median']
+    # Safety check: ensure user_question is a string
+    if not user_question or not isinstance(user_question, str):
+        return {
+            "needs_pyodide": False
+        }
+
+    pyodide_keywords = [
+        'correlation', 'statistics', 'analyze', 'analyse', 'describe', 'summary',
+        'std', 'mean', 'median', 'variance', 'average', 'distribution',
+        '상관관계', '통계', '분석', '요약', '평균', '표준편차', '분산'
+    ]
 
     needs_pyodide = any(keyword in user_question.lower() for keyword in pyodide_keywords)
 
@@ -343,28 +358,36 @@ def generate_pyodide_analysis(state: SQLAgentState) -> dict:
     user_question = state['user_question']
     sql_result = state['query_result']
 
-    if "Error:" in sql_result or sql_result in [None, "[]", ""]:
+    # Safety check: ensure sql_result is valid
+    if not sql_result or not isinstance(sql_result, str):
         return {}
 
-    pyodide_prompt = f"""
-    You are a Python Data Analyst. 
-    The user asked: "{user_question}"
-    
-    I have retrieved data from the database in JSON format:
-    {sql_result}
-    
-    Write a Python script to analyze this data using 'pandas'.
-    
-    **Requirements:**
-    1. Create a DataFrame directly from the JSON data provided above.
-    2. Example: 
-       import pandas as pd
-       data = {sql_result} 
-       df = pd.DataFrame(data)
-    3. Perform the analysis requested (e.g., correlation, description, math).
-    4. PRINT the final result using `print()`. The user will see the standard output.
-    5. Return ONLY the Python code. No markdown formatting.
-    """
+    if "Error:" in sql_result or sql_result in ["[]", ""]:
+        return {}
+
+    pyodide_prompt = f"""You are a Python Data Analyst using pandas in a browser environment (Pyodide).
+
+User Question: "{user_question}"
+
+Database Result (JSON format):
+{sql_result}
+
+Generate Python code to analyze this data. CRITICAL RULES:
+
+1. MANDATORY: Use the JSON data provided above - DO NOT create sample data
+2. Import pandas: import pandas as pd
+3. Load the actual data: df = pd.DataFrame({sql_result})
+4. Perform ONLY the analysis requested (correlation, statistics, grouping, etc.)
+5. Print the result using print() - this is what the user will see
+6. DO NOT use matplotlib or plotting libraries - only pandas operations
+7. Keep output concise and readable
+8. Return ONLY executable Python code, NO markdown, NO explanations
+
+Example for "show statistics":
+import pandas as pd
+df = pd.DataFrame({sql_result})
+print(df.describe())
+"""
     
     response = llm.invoke(pyodide_prompt)
     code = response.content.replace("```python", "").replace("```", "").strip()

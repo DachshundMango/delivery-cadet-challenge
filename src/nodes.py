@@ -4,7 +4,7 @@ import json
 import re
 from dotenv import load_dotenv
 from src.state import SQLAgentState
-from langchain.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
@@ -124,15 +124,19 @@ def generate_SQL(state: SQLAgentState) -> dict:
 
     initial_prompt = f"""You are an expert data engineer.
     Convert user questions into valid PostgreSQL queries.
-    
+
     Here is the ACTUAL schema of the database:
     {schema_info}
-    
+
     Rules:
-    1. Use ONLY the column names explicitly listed above. 
+    1. Use ONLY the column names explicitly listed above.
     2. Return ONLY the SQL query string.
     3. If a table or column name contains mixed case letters (camelCase), you MUST enclose it in double quotes.
     4. Example: Do not write `SELECT paymentMethod ...`. Write `SELECT "paymentMethod" ...`.
+    5. When the question asks for "total", "sum", or aggregated values, use appropriate aggregate functions (SUM, COUNT, AVG) with GROUP BY.
+    6. Example: "total quantity sold by product" requires `SELECT product, SUM(quantity) as total_quantity FROM table GROUP BY product`.
+    7. When ordering by an aggregated column, use the alias or column position in ORDER BY.
+    8. Always think about whether the question requires aggregation before writing the query.
     """
     
     prompt_template = ChatPromptTemplate.from_messages([
@@ -188,10 +192,10 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
     You are a data visualisation expert. Analyze the user's question and SQL result to determine if visualisation is needed.
 
     **Output Format (JSON only):**
-    {{
+    {{{{
     "visualise": "yes" or "no",
     "chart_type": "bar" or "line" or "pie"
-    }}
+    }}}}
 
     **Chart Type Guidelines:**
     - bar: Comparisons, rankings, top N items (e.g., "top 10 products", "sales by region")
@@ -245,8 +249,21 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         chart_type
     )
 
+    if plotly_data is None:
+        return {
+        "plotly_data": None
+        }
+    
+    tool_message = ToolMessage(
+        content=plotly_data,
+        tool_call_id="call_visulisaion_1",
+        name="create_plotly_chart"
+    )
+
     return {
-        "plotly_data": plotly_data.to_dict()
+        "messages": [tool_message],
+        "plotly_data": plotly_data
+        
     }
 
 def create_plotly_chart(sql_result, chart_type):
@@ -288,8 +305,11 @@ def create_plotly_chart(sql_result, chart_type):
         # Fallback to bar chart for unknown types
         fig = px.bar(x=x_data, y=y_data)
 
-    return fig
-
+    return json.dumps({
+        "type": "plotly",
+        "data": json.loads(fig.to_json())['data'],
+        "layout": json.loads(fig.to_json())['layout']
+    })
 
 def generate_response(state: SQLAgentState) -> dict:
 
@@ -301,11 +321,21 @@ def generate_response(state: SQLAgentState) -> dict:
         return {"messages": [HumanMessage(content=f"An error ocurrs in query processing.\n{result}")]}
 
     response_prompt = f"""
+    You are a helpful data assistant. Answer the user's question based on the SQL result provided.
+
     User asked: {question}
-    SQL query used: {sql}
     SQL Result: {result}
 
-    If the result is empty, say "No data found".
+    **Instructions:**
+    - Provide a clear, concise answer to the user's question
+    - Present the data in a natural, easy-to-read format
+    - DO NOT explain the SQL query or show the SQL code
+    - DO NOT provide Python code or implementation details
+    - DO NOT give unnecessary technical explanations
+    - If the result is empty, say "No data found"
+    - Keep your response brief and focused on answering the question
+
+    Answer the question directly using the SQL result.
     """
 
 

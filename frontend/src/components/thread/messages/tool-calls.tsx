@@ -2,6 +2,8 @@ import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
+// chart components import
+import { PlotlyChart } from "@/components/ui/plotly-chart";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -81,6 +83,14 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     parsedContent = message.content;
   }
 
+  // check if the content is a plotly chart
+  // condition: 1. is json content, 2. not an array, 3. type is plotly, 4. data is an array
+  const isPlotly = 
+    isJsonContent &&
+    !Array.isArray(parsedContent) &&
+    parsedContent?.type === "plotly" &&
+    Array.isArray(parsedContent?.data);
+
   const contentStr = isJsonContent
     ? JSON.stringify(parsedContent, null, 2)
     : String(message.content);
@@ -133,7 +143,15 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                {isJsonContent ? (
+                {/* [변경점 3] 렌더링 분기: Plotly 차트 우선 표시 */}
+                {isPlotly ? (
+                  <div className="w-full">
+                    <PlotlyChart 
+                      data={parsedContent.data} 
+                      layout={parsedContent.layout} 
+                    />
+                  </div>
+                ) : isJsonContent ? (
                   <table className="min-w-full divide-y divide-gray-200">
                     <tbody className="divide-y divide-gray-200">
                       {(Array.isArray(parsedContent)
@@ -170,7 +188,8 @@ export function ToolResult({ message }: { message: ToolMessage }) {
               </motion.div>
             </AnimatePresence>
           </div>
-          {((shouldTruncate && !isJsonContent) ||
+          {/* JSON이 아니고 내용이 길거나, JSON 배열이 5개 초과일 때만 확장 버튼 표시 (Plotly일 때는 숨김) */}
+          {!isPlotly && ((shouldTruncate && !isJsonContent) ||
             (isJsonContent &&
               Array.isArray(parsedContent) &&
               parsedContent.length > 5)) && (

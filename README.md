@@ -12,7 +12,8 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Natural Language to SQL**: Converts user questions into valid PostgreSQL queries
 - **Intent Classification**: Intelligently routes between SQL-based queries and general conversation
 - **Automatic Query Retry**: Self-correcting mechanism for failed queries
-- **Data Visualization**: Automatic chart generation (bar, line, pie) using Plotly for visual data insights
+- **Data Visualisation**: Automatic chart generation (bar, line, pie) using Plotly for visual data insights
+- **In-Browser Python Execution**: Pyodide-powered pandas analysis running directly in the browser
 - **Conversational Interface**: ChatGPT-style UI for seamless user interaction
 - **Real-time Streaming**: Live response streaming through the web interface
 - **Dataset-Agnostic Design**: Easily adaptable to new datasets via metadata configuration
@@ -37,9 +38,9 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Groq**: High-performance LLM inference (llama-3.1-8b-instant)
 - **PostgreSQL 15**: Primary database
 - **SQLAlchemy**: Database ORM and query builder
-- **Plotly**: Interactive data visualization library
+- **Plotly**: Interactive data visualisation library
 - **FastAPI**: Web server (via LangGraph)
-- **LangSmith**: Execution trace visualization
+- **LangSmith**: Execution trace visualisation
 
 ### Frontend
 - **Next.js 15**: React meta-framework (App Router)
@@ -48,6 +49,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Tailwind CSS 4**: Styling
 - **Radix UI**: Accessible component library
 - **Plotly.js & React-Plotly.js**: Interactive charting library
+- **Pyodide & react-py**: In-browser Python runtime with pandas support
 - **Framer Motion**: Animations
 
 ### Infrastructure
@@ -80,7 +82,7 @@ Create a `.env` file in the root directory:
 # Groq API Key
 GROQ_API_KEY=your_groq_api_key_here
 
-# LangSmith Settings (Required for trace visualization)
+# LangSmith Settings (Required for trace visualisation)
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your_langsmith_api_key_here
 LANGCHAIN_PROJECT=delivery-cadet-challenge
@@ -288,6 +290,24 @@ cadet/
   │     └───────────┬──────────────────┘
   │                 │
   │                 ▼
+  │     ┌──────────────────────────────┐
+  │     │pyodide_request_              │
+  │     │      classification          │  Check if Python analysis needed
+  │     └───────────┬──────────────────┘
+  │                 │
+  │           ┌─────┴──────┐
+  │           │            │
+  │           ▼            ▼
+  │    [needs_pyodide] [skip]
+  │           │            │
+  │           ▼            │
+  │  ┌─────────────────┐  │
+  │  │generate_pyodide_│  │
+  │  │    analysis     │  │
+  │  └────────┬────────┘  │
+  │           │            │
+  │           └────┬───────┘
+  │                ▼
   │           ┌───────────────┐
   │           │generate_      │
   │           │  response     │
@@ -305,10 +325,13 @@ cadet/
 1. **Intent Classification**: Determines if the user wants data (SQL) or conversation (general)
 2. **SQL Generation**: Uses LLM to convert natural language to PostgreSQL queries
 3. **Query Execution**: Runs SQL against the database and handles errors
-4. **Visualization Request Classification**: Analyzes query results and determines if visual representation is needed
+4. **Visualisation Request Classification**: Analyses query results and determines if visual representation is needed
 5. **Chart Generation**: Creates interactive Plotly charts (bar, line, pie) from SQL results
-6. **Response Generation**: Converts SQL results into natural language
-7. **Retry Logic**: Automatically regenerates queries on errors
+6. **Pyodide Request Classification**: Checks user question for analysis keywords (correlation, statistics, describe, etc.)
+7. **Conditional Pyodide Execution**: Only generates Python code when advanced analysis is explicitly requested
+8. **In-Browser Python Execution**: Executes pandas-based Python code using Pyodide in the browser
+9. **Response Generation**: Converts SQL results into natural language
+10. **Retry Logic**: Automatically regenerates queries on errors
 
 ### Dataset-Agnostic Design
 
@@ -371,7 +394,7 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 
 ### Hard (Multi-Table Joins)
 - "Show total revenue by supplier ingredient. Which ingredients are associated with the highest-selling franchises?"
-- "Analyze daily sales trends over time."
+- "Analyse daily sales trends over time."
 - "Compare revenue by franchise size (S, M, L, XL, XXL) with average transaction values."
 
 ### Expert (Window Functions)
@@ -383,7 +406,7 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 
 ### Why PostgreSQL?
 - Robust support for complex joins and window functions
-- Better performance for analytical queries than SQLite
+- Better performance for analytic queries than SQLite
 - Production-ready with ACID compliance
 - Docker makes setup trivial
 
@@ -399,7 +422,7 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 - Production-ready with streaming support
 
 ### Why Next.js?
-- Server components for optimal performance
+- Server components for optimised performance
 - Built-in API routes for proxy layer
 - Excellent TypeScript support
 - App Router provides modern React patterns
@@ -409,10 +432,12 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 ### Current Limitations
 
 1. **Limited Chart Types**: Currently supports only bar, line, and pie charts
-   - Scatter plots, heatmaps, and other advanced visualizations not yet implemented
+   - Scatter plots, heatmaps, and other advanced visualisations not yet implemented
 
-2. **No Python Execution**: Cannot perform advanced data analysis or transformations beyond SQL
-   - Limited to SQL capabilities only
+2. **Pyodide Performance**: Python execution triggered by keyword matching
+   - Simple keyword-based classification may miss nuanced analysis requests
+   - Pandas loading time (~2-3 seconds) on first use
+   - Increased browser memory consumption
 
 3. **Simple PII Masking**: Uses regex pattern matching for name detection
    - May not catch all PII or may over-mask legitimate data
@@ -426,31 +451,37 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 
 ### Planned Improvements
 
-1. **Advanced Visualizations**: Expand chart types beyond bar, line, and pie
+1. **Advanced Visualisations**: Expand chart types beyond bar, line, and pie
    - Scatter plots, heatmaps, box plots, histograms
    - Multi-axis and combination charts
-   - Customizable chart styling and themes
+   - Customisable chart styling and themes
 
-2. **Pyodide Integration**: Enable in-browser Python execution
-   - Allow pandas, numpy operations on query results
-   - Enable advanced statistical analysis
+2. **Smart Pyodide Triggering**: Enhance Python execution classification
+   - Use LLM-based classification instead of keyword matching for better accuracy
+   - Add support for Korean and other language keywords
+   - Fine-tune trigger conditions to reduce false positives
 
-3. **NER-based PII Detection**: Replace regex with named entity recognition
+3. **Extended Python Capabilities**: Add numpy, scipy, matplotlib support
+   - Statistical hypothesis testing
+   - Advanced mathematical operations
+   - Chart generation from Python code
+
+4. **NER-based PII Detection**: Replace regex with named entity recognition
    - More accurate personal information detection
    - Reduced false positives
 
-4. **LLM Fallback Chain**: Add OpenAI or Anthropic as backup
+5. **LLM Fallback Chain**: Add OpenAI or Anthropic as backup
    - Graceful degradation if primary LLM fails
 
-5. **Redis Caching Layer**: Cache SQL results and LLM responses
+6. **Redis Caching Layer**: Cache SQL results and LLM responses
    - Faster responses for common questions
    - Reduced API costs
 
-6. **Proactive Insights**: Agent automatically discovers interesting patterns
+7. **Proactive Insights**: Agent automatically discovers interesting patterns
    - Periodic analysis of data
    - Suggested questions to users
 
-7. **Multi-Database Support**: Extend beyond PostgreSQL
+8. **Multi-Database Support**: Extend beyond PostgreSQL
    - MySQL, SQLite, Snowflake adapters
    - Dialect-aware SQL generation
 

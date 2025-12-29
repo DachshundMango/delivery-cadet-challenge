@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 // chart components import
 import { PlotlyChart } from "@/components/ui/plotly-chart";
+// python runner component import
+import { PythonRunner } from "@/components/ui/python-runner";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -83,6 +85,8 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     parsedContent = message.content;
   }
 
+  const isPython = message.name === "python_interpreter";
+  
   // check if the content is a plotly chart
   // condition: 1. is json content, 2. not an array, 3. type is plotly, 4. data is an array
   const isPlotly = 
@@ -144,7 +148,9 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 transition={{ duration: 0.2 }}
               >
                 {/* [변경점 3] 렌더링 분기: Plotly 차트 우선 표시 */}
-                {isPlotly ? (
+                {isPython ? (
+                  <PythonRunner code={message.content as string} />
+                ) : isPlotly ? (
                   <div className="w-full">
                     <PlotlyChart 
                       data={parsedContent.data} 

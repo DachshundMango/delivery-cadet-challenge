@@ -4,7 +4,7 @@ import json
 import re
 from dotenv import load_dotenv
 from src.state import SQLAgentState
-from langchain.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
@@ -165,15 +165,18 @@ def execute_SQL(state: SQLAgentState) -> dict:
     try:
         with engine.connect() as conn:
             result = conn.execute(text(sql_query))
-            rows = result.fetchall()
-            result_str = str(rows)
-
+            rows = [dict(row._mapping) for row in result.fetchall()]
+            result_str = json.dumps(rows, default=str, ensure_ascii=False)
             # Apply PII masking to query results
             #masked_result = mask_pii_in_query_result(sql_query, result_str)
-
-            return {"query_result": result_str} #후에 result_str -> masked_result 변경 필요
+            return {
+                "query_result": result_str
+            } #후에 result_str -> masked_result 변경 필요
+    
     except Exception as e:
-        return {"query_result": f"Error: {str(e)}"}
+        return {
+            "query_result": f"Error: {str(e)}"
+        }
 
 def visualisation_request_classification(state: SQLAgentState) -> dict:
     
@@ -269,11 +272,14 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
 def create_plotly_chart(sql_result, chart_type):
     
     try:
-        sql_list = ast.literal_eval(sql_result)
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
+        sql_list = json.loads(sql_result)
+    except Exception:
+        try:
+            sql_list = ast.literal_eval(sql_result)
+        except Exception as e:
+            print(f"Error: {e}")
+            return None
+    
     if not sql_list:
         return None
     
@@ -282,14 +288,22 @@ def create_plotly_chart(sql_result, chart_type):
     
     for data in sql_list:
 
-        x_string_parts = [x for x in data[:-1] if type(x) == str]
+
+        if isinstance(data, dict):
+            row_values = list(data.values())
+        elif isinstance(data, (list, tuple)):
+            row_values = list(data)
+        else:
+            continue
+
+        x_string_parts = [str(x) for x in row_values[:-1]]
 
         if x_string_parts:
             x_label = ' '.join(x_string_parts)
         else:
-            x_label = data[0]
+            x_label = str(row_values[0])
         
-        y_label = data[-1]
+        y_label = row_values[-1]
 
         x_data.append(x_label)
         y_data.append(y_label)
@@ -310,6 +324,61 @@ def create_plotly_chart(sql_result, chart_type):
         "data": json.loads(fig.to_json())['data'],
         "layout": json.loads(fig.to_json())['layout']
     })
+
+def pyodide_request_classification(state: SQLAgentState) -> dict:
+    
+    user_question = state['user_question']
+
+    pyodide_keywords = ['correlation', 'statistics', 'analyze', 'describe', 'summary', 'std', 'mean', 'median']
+
+    needs_pyodide = any(keyword in user_question.lower() for keyword in pyodide_keywords)
+
+    return {
+        "needs_pyodide": needs_pyodide
+    }
+
+
+def generate_pyodide_analysis(state: SQLAgentState) -> dict:
+
+    user_question = state['user_question']
+    sql_result = state['query_result']
+
+    if "Error:" in sql_result or sql_result in [None, "[]", ""]:
+        return {}
+
+    pyodide_prompt = f"""
+    You are a Python Data Analyst. 
+    The user asked: "{user_question}"
+    
+    I have retrieved data from the database in JSON format:
+    {sql_result}
+    
+    Write a Python script to analyze this data using 'pandas'.
+    
+    **Requirements:**
+    1. Create a DataFrame directly from the JSON data provided above.
+    2. Example: 
+       import pandas as pd
+       data = {sql_result} 
+       df = pd.DataFrame(data)
+    3. Perform the analysis requested (e.g., correlation, description, math).
+    4. PRINT the final result using `print()`. The user will see the standard output.
+    5. Return ONLY the Python code. No markdown formatting.
+    """
+    
+    response = llm.invoke(pyodide_prompt)
+    code = response.content.replace("```python", "").replace("```", "").strip()
+    
+    tool_message = ToolMessage(
+        content=code,
+        tool_call_id="call_python_interpreter",
+        name="python_interpreter"
+    )
+    
+    return {
+        "messages": [tool_message]
+    }
+
 
 def generate_response(state: SQLAgentState) -> dict:
 

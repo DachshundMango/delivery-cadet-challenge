@@ -46,6 +46,7 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.0.1",
     "react-plotly.js": "^2.6.0",
+    "react-py": "^1.11.5",
     "react-syntax-highlighter": "^15.5.0",
     "recharts": "^2.15.1",
     "rehype-katex": "^7.0.1",

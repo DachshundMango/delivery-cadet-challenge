@@ -126,15 +126,15 @@ This will start:
 ### Step 1: Profile the Data
 
 ```bash
-python src/profiler.py
+python -m src.data_pipeline.profiler
 ```
 
-This generates `data_profile.json` with statistics about each CSV file.
+This generates `src/config/data_profile.json` with statistics about each CSV file.
 
 ### Step 2: (Optional) Discover Relationships
 
 ```bash
-python src/relationship_discovery.py
+python -m src.data_pipeline.relationship_discovery
 ```
 
 This suggests potential foreign key relationships based on column names and data patterns.
@@ -142,29 +142,29 @@ This suggests potential foreign key relationships based on column names and data
 ### Step 3: Load Data into Database
 
 ```bash
-python src/load_data.py
+python -m src.data_pipeline.load_data
 ```
 
 This script:
 - Creates tables from CSV files
-- Applies primary and foreign key constraints from `keys.json`
+- Applies primary and foreign key constraints from `src/config/keys.json`
 - Loads data into PostgreSQL
 - Validates data integrity
 
 ### Step 4: Generate Schema Information
 
 ```bash
-python src/generate_schema.py
+python -m src.data_pipeline.generate_schema
 ```
 
 This creates:
-- `schema_info.json`: Structured schema metadata used by the LLM
-- `schema_info.md`: Human-readable schema documentation
+- `src/config/schema_info.json`: Structured schema metadata used by the LLM
+- `src/config/schema_info.md`: Human-readable schema documentation
 
 ### Step 5: (Optional) Verify Data Integrity
 
 ```bash
-python src/integrity_checker.py
+python -m src.data_pipeline.integrity_checker
 ```
 
 Checks for:
@@ -194,7 +194,7 @@ Open http://localhost:3000 in your browser.
 ### Option 2: CLI Mode (Testing)
 
 ```bash
-python src/cli.py
+python3 src/cli.py
 ```
 
 Interactive command-line interface for testing the agent directly.
@@ -204,19 +204,38 @@ Interactive command-line interface for testing the agent directly.
 ```
 cadet/
 ├── src/                          # Python backend source code
-│   ├── cli.py                    # CLI entry point
-│   ├── graph.py                  # LangGraph workflow definition
-│   ├── nodes.py                  # Agent node implementations
-│   ├── state.py                  # State management schema
-│   ├── load_data.py              # CSV to DB ETL pipeline
-│   ├── generate_schema.py        # Schema metadata generator
-│   ├── transform_data.py         # PK/FK synchronization
-│   ├── integrity_checker.py      # Data validation utilities
-│   ├── relationship_discovery.py # Automatic FK detection
-│   ├── profiler.py               # CSV data profiler
-│   ├── reset_db.py               # Database reset utility
-│   ├── keys.json                 # PK/FK metadata configuration
-│   └── schema_info.json          # Generated schema (used by LLM)
+│   ├── agent/                    # LangGraph agent workflow
+│   │   ├── __init__.py           # Public API exports
+│   │   ├── graph.py              # LangGraph workflow definition
+│   │   ├── nodes.py              # Agent node implementations
+│   │   └── state.py              # State management schema
+│   │
+│   ├── data_pipeline/            # ETL and data preparation
+│   │   ├── __init__.py           # Public API exports
+│   │   ├── load_data.py          # CSV to DB ETL pipeline
+│   │   ├── generate_schema.py    # Schema metadata generator
+│   │   ├── transform_data.py     # PK/FK synchronization
+│   │   ├── integrity_checker.py  # Data validation utilities
+│   │   ├── relationship_discovery.py  # Automatic FK detection
+│   │   └── profiler.py           # CSV data profiler
+│   │
+│   ├── core/                     # Shared utilities
+│   │   ├── __init__.py           # Public API exports
+│   │   ├── db.py                 # Database connection management
+│   │   ├── logger.py             # Logging configuration
+│   │   ├── errors.py             # Custom exception classes
+│   │   └── validation.py         # Input validation utilities
+│   │
+│   ├── config/                   # Configuration and metadata
+│   │   ├── keys.json             # PK/FK metadata configuration
+│   │   ├── schema_info.json      # Generated schema (used by LLM)
+│   │   ├── schema_info.md        # Human-readable schema docs
+│   │   └── data_profile.json     # Data profiling statistics
+│   │
+│   ├── scripts/                  # Utility scripts
+│   │   └── reset_db.py           # Database reset utility
+│   │
+│   └── cli.py                    # CLI entry point
 │
 ├── frontend/                     # Next.js frontend
 │   ├── src/
@@ -345,7 +364,7 @@ The system loads schema information from `schema_info.json` at runtime, meaning:
 ### Changing the Database
 
 1. Place new CSV files in the `data/` directory
-2. Edit `src/keys.json` to define primary and foreign keys:
+2. Edit `src/config/keys.json` to define primary and foreign keys:
 
 ```json
 {
@@ -364,13 +383,13 @@ The system loads schema information from `schema_info.json` at runtime, meaning:
 
 3. Run the data pipeline:
 ```bash
-python src/load_data.py
-python src/generate_schema.py
+python -m src.data_pipeline.load_data
+python -m src.data_pipeline.generate_schema
 ```
 
 ### Changing the LLM Model
 
-Edit `src/nodes.py` line 15:
+Edit `src/agent/nodes.py` line 31:
 
 ```python
 # Current: llama-3.1-8b-instant

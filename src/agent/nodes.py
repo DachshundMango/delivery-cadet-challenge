@@ -5,6 +5,14 @@ import re
 from typing import Set, Optional
 from dotenv import load_dotenv
 from src.agent.state import SQLAgentState
+from src.agent.prompts import (
+    get_intent_classification_prompt,
+    get_general_response_prompt,
+    get_sql_generation_prompt,
+    get_visualization_prompt,
+    get_pyodide_analysis_prompt,
+    get_response_generation_prompt,
+)
 from src.core.logger import setup_logger
 from src.core.db import get_db_engine
 from src.core.errors import (
@@ -182,40 +190,10 @@ def intent_classification(state: SQLAgentState) -> dict:
     if not user_question:
         raise ValidationError("Missing user_question in state")
 
-    # Improved prompt with few-shot examples
-    intent_prompt = """Classify user input into: sql or general
-
-    **Few-Shot Examples:**
-
-    User: "Show me top 10 records"
-    Classification: sql
-
-    User: "What is the total count?"
-    Classification: sql
-
-    User: "Which item has the highest value?"
-    Classification: sql
-
-    User: "Hello"
-    Classification: general
-
-    User: "What can you do?"
-    Classification: general
-
-    User: "Create a chart"
-    Classification: sql
-
-    User: "Compare A and B"
-    Classification: sql
-
-    **Rules:**
-    - ANY question about data, numbers, rankings, comparisons → sql
-    - ONLY greetings (hello/hi) or capability questions (what can you do) → general
-    - DEFAULT → sql
-
-    Return ONLY the word sql or general - no markdown, no explanations, no punctuation."""
-
     try:
+        # Get prompt from prompts module
+        intent_prompt = get_intent_classification_prompt()
+
         prompt_template = ChatPromptTemplate.from_messages([
             ("system", "{intent_prompt}"),
             ("human", "{user_question}")
@@ -250,18 +228,8 @@ def generate_general_response(state: SQLAgentState) -> dict:
 
     user_question = state['user_question']
 
-    general_prompt = f"""You are a database query assistant. You ONLY answer questions using the connected database.
-
-User question: "{user_question}"
-
-**Critical Rules:**
-- You can ONLY answer questions based on data in the database
-- NEVER use web search or general knowledge
-- If the user asks about capabilities, explain you analyze data from the connected database
-- If greeting (hello/hi), respond politely and offer to help with database queries
-- For any other question, respond: "I can only answer questions based on the database. Please ask a data-related question."
-
-Respond briefly and clearly."""
+    # Get prompt from prompts module
+    general_prompt = get_general_response_prompt(user_question)
 
     response = llm.invoke(general_prompt)
 
@@ -410,30 +378,8 @@ def generate_SQL(state: SQLAgentState) -> dict:
             schema_data = json.load(f)
         allowed_tables = set(schema_data['tables'].keys())
 
-        # Concise prompt with PostgreSQL-specific quoting rules
-        sql_prompt = f"""Generate PostgreSQL SELECT query.
-
-**Database Schema:**
-{schema_info}
-
-**CRITICAL PostgreSQL Quoting Rules:**
-- PostgreSQL converts unquoted identifiers to LOWERCASE
-- ALWAYS use double quotes around ALL column names, even after table aliases
-- Quote every column reference: alias."columnName" NOT alias.columnName
-
-**Examples:**
-CORRECT: SELECT s."first_name", s."customerID" FROM "sales_customers" s JOIN "sales_transactions" t ON s."customerID" = t."customerID"
-WRONG: SELECT s.first_name, s.customerID FROM "sales_customers" s JOIN "sales_transactions" t ON s.customerID = t.customerID
-
-**Query Rules:**
-1. Use ONLY tables/columns from schema above
-2. Use GROUP BY with aggregate functions (SUM, COUNT, AVG)
-3. ORDER BY aliases or column position for aggregates
-4. Return ONLY SQL query - no markdown, no explanations
-
-**User Question:** {user_question}
-
-**SQL Query:**"""
+        # Get prompt from prompts module
+        sql_prompt = get_sql_generation_prompt(schema_info, user_question)
 
         response = llm.invoke(sql_prompt)
         sql_query = response.content.strip()
@@ -527,26 +473,10 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         logger.info("Skipping visualization (empty result)")
         return {"plotly_data": None}
 
-    # Concise prompt
-    vis_prompt = f"""Analyze if result needs visualization.
-
-**Question:** {user_question}
-**Result:** {sql_result[:200]}...
-
-**Criteria:**
-- Keywords: "chart", "visualize", "compare", "trend" → yes
-- 3+ rows + aggregated data → yes
-- Single value → no
-
-**Chart Types:**
-- bar: Rankings, comparisons
-- line: Time series, trends
-- pie: Proportions
-
-Return ONLY JSON - no markdown, no explanations:
-{{"visualise": "yes" or "no", "chart_type": "bar" or "line" or "pie"}}"""
-
     try:
+        # Get prompt from prompts module
+        vis_prompt = get_visualization_prompt(user_question, sql_result)
+
         response = llm.invoke(vis_prompt)
 
         # Clean markdown formatting (similar to SQL generation)
@@ -674,30 +604,9 @@ def generate_pyodide_analysis(state: SQLAgentState) -> dict:
     if "Error:" in sql_result or sql_result in ["[]", ""]:
         return {}
 
-    pyodide_prompt = f"""You are a Python Data Analyst using pandas in a browser environment (Pyodide).
+    # Get prompt from prompts module
+    pyodide_prompt = get_pyodide_analysis_prompt(user_question, sql_result)
 
-User Question: "{user_question}"
-
-Database Result (JSON format):
-{sql_result}
-
-Generate Python code to analyze this data. CRITICAL RULES:
-
-1. MANDATORY: Use the JSON data provided above - DO NOT create sample data
-2. Import pandas: import pandas as pd
-3. Load the actual data: df = pd.DataFrame({sql_result})
-4. Perform ONLY the analysis requested (correlation, statistics, grouping, etc.)
-5. Print the result using print() - this is what the user will see
-6. DO NOT use matplotlib or plotting libraries - only pandas operations
-7. Keep output concise and readable
-8. Return ONLY executable Python code, NO markdown, NO explanations
-
-Example for "show statistics":
-import pandas as pd
-df = pd.DataFrame({sql_result})
-print(df.describe())
-"""
-    
     response = llm.invoke(pyodide_prompt)
     code = response.content.replace("```python", "").replace("```", "").strip()
     
@@ -731,20 +640,8 @@ def generate_response(state: SQLAgentState) -> dict:
             content="No data found for your question. Please try a different query."
         )]}
 
-    # Generate response with concise prompt
-    response_prompt = f"""Answer the user's question using the query results.
-
-**Question:** {question}
-**Results:** {result[:1000]}
-
-**Guidelines:**
-- Direct, clear answer
-- Natural, readable format
-- NO SQL code or technical details
-- Summarize if many results
-- Use bullet points for readability
-
-**Answer:**"""
+    # Get prompt from prompts module
+    response_prompt = get_response_generation_prompt(question, result)
 
     response = llm.invoke(response_prompt)
     logger.info("Response generated successfully")

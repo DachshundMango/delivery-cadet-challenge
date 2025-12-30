@@ -17,6 +17,7 @@ from .nodes import (
     generate_pyodide_analysis,
     pyodide_request_classification,
 )
+from . import prompts
 
 __all__ = [
     # Workflow
@@ -35,4 +36,6 @@ __all__ = [
     'visualisation_request_classification',
     'generate_pyodide_analysis',
     'pyodide_request_classification',
+    # Prompts
+    'prompts',
 ]

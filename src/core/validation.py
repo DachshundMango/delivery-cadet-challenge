@@ -1,7 +1,7 @@
 """Input validation utilities for user inputs"""
 
-from src.errors import ValidationError
-from src.logger import setup_logger
+from src.core.errors import ValidationError
+from src.core.logger import setup_logger
 
 logger = setup_logger('cadet.validation')
 

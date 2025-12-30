@@ -1,13 +1,17 @@
-import sys
-import os
-
-# Add project root to path for consistent imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from langgraph.graph import START, StateGraph, END
-from src.state import SQLAgentState, is_error_result
-from src.nodes import read_question, intent_classification, generate_SQL, execute_SQL, generate_general_response, generate_response, visualisation_request_classification, generate_pyodide_analysis, pyodide_request_classification
-from src.logger import setup_logger
+from src.agent.state import SQLAgentState, is_error_result
+from src.agent.nodes import (
+    read_question,
+    intent_classification,
+    generate_SQL,
+    execute_SQL,
+    generate_general_response,
+    generate_response,
+    visualisation_request_classification,
+    generate_pyodide_analysis,
+    pyodide_request_classification,
+)
+from src.core.logger import setup_logger
 
 logger = setup_logger('cadet.graph')
 MAX_SQL_RETRIES = 3

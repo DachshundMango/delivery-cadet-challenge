@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import create_engine, Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from dotenv import load_dotenv
-from src.logger import setup_logger
+from src.core.logger import setup_logger
 
 load_dotenv()
 logger = setup_logger('cadet.db')

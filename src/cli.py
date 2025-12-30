@@ -5,7 +5,7 @@ import logging
 # Add project root to path for consistent imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.graph import app
+from src.agent.graph import app
 from pprint import pprint
 from langchain_core.messages import HumanMessage
 

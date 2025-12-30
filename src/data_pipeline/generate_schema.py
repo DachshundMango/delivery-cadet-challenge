@@ -2,15 +2,16 @@ import os
 import json
 from dotenv import load_dotenv
 from sqlalchemy import Engine, text
-from src.db import get_db_engine
+from src.core.db import get_db_engine
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
-KEYS_PATH = os.path.join(SRC_DIR, 'keys.json')
-SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'schema_info.json')
-SCHEMA_MD_PATH = os.path.join(SRC_DIR, 'schema_info.md')
+CONFIG_DIR = os.path.join(SRC_DIR, 'config')
+KEYS_PATH = os.path.join(CONFIG_DIR, 'keys.json')
+SCHEMA_JSON_PATH = os.path.join(CONFIG_DIR, 'schema_info.json')
+SCHEMA_MD_PATH = os.path.join(CONFIG_DIR, 'schema_info.md')
 
 
 def load_keys_config() -> dict:

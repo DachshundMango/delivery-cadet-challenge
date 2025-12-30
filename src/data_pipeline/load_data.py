@@ -4,13 +4,14 @@ import json
 import pandas as pd
 from sqlalchemy import Engine, text
 from dotenv import load_dotenv
-from src.db import get_db_engine
+from src.core.db import get_db_engine
 
-load_dotenv() 
+load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
+CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 
 def load_csv_to_db(file_path: str, table_name: str, engine: Engine) -> None:
     
@@ -90,7 +91,7 @@ def add_foreign_key(keys: dict, table_name: str, engine: Engine) -> bool:
 def main() -> None:
     engine = get_db_engine()
     files = glob.glob(os.path.join(DATA_DIR, '*.csv'))
-    keys_json = os.path.join(SRC_DIR, 'keys.json')
+    keys_json = os.path.join(CONFIG_DIR, 'keys.json')
 
     if not files:
         print('csv file does not exist in the data directory.')

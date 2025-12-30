@@ -4,10 +4,10 @@ import json
 import re
 from typing import Set, Optional
 from dotenv import load_dotenv
-from src.state import SQLAgentState
-from src.logger import setup_logger
-from src.db import get_db_engine
-from src.errors import (
+from src.agent.state import SQLAgentState
+from src.core.logger import setup_logger
+from src.core.db import get_db_engine
+from src.core.errors import (
     ValidationError,
     SQLGenerationError,
     SchemaLoadError,
@@ -32,9 +32,9 @@ LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.1-8b-instant')
 llm = ChatGroq(model=LLM_MODEL)
 
 # File paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
-SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'schema_info.json')
+SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'config', 'schema_info.json')
 
 # Module-level caches
 _SCHEMA_CACHE: Optional[str] = None

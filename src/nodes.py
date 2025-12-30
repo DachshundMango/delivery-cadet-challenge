@@ -2,41 +2,92 @@ import ast
 import os
 import json
 import re
+from typing import Set, Optional
 from dotenv import load_dotenv
 from src.state import SQLAgentState
+from src.logger import setup_logger
+from src.db import get_db_engine
+from src.errors import (
+    ValidationError,
+    SQLGenerationError,
+    SchemaLoadError,
+    LLMError
+)
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, Engine
+from sqlalchemy.exc import SQLAlchemyError
+import sqlparse
+from sqlparse.sql import IdentifierList, Identifier
+from sqlparse.tokens import Keyword
 import plotly.express as px
 
 load_dotenv()
+logger = setup_logger('cadet.nodes')
 
-#llm = ChatGroq(model='llama-3.3-70b-versatile')
-llm = ChatGroq(model='llama-3.1-8b-instant')
+# LLM configuration (can be overridden by environment variable)
+LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.1-8b-instant')
+llm = ChatGroq(model=LLM_MODEL)
 
+# File paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'schema_info.json')
 
-def get_db_engine():
-    """Create database engine"""
-    DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:5432/{os.getenv('DB_NAME')}"
-    return create_engine(DB_URL)
+# Module-level caches
+_SCHEMA_CACHE: Optional[str] = None
+_DB_ENGINE: Optional[Engine] = None
 
-def load_schema_info():
-    """Load pre-generated schema info from schema_info.json"""
+# Configuration constants
+MAX_RETRY_COUNT = 3
+VALID_CHART_TYPES = {'bar', 'line', 'pie'}
+
+
+def get_cached_engine() -> Engine:
+    """Get or create cached database engine"""
+    global _DB_ENGINE
+    if _DB_ENGINE is None:
+        _DB_ENGINE = get_db_engine()
+    return _DB_ENGINE
+
+
+def load_schema_info() -> str:
+    """
+    Load pre-generated schema info from schema_info.json with caching.
+
+    Returns:
+        LLM-ready schema description string
+
+    Raises:
+        SchemaLoadError: If schema file not found or invalid
+    """
+    global _SCHEMA_CACHE
+
+    if _SCHEMA_CACHE is not None:
+        return _SCHEMA_CACHE
+
     if not os.path.exists(SCHEMA_JSON_PATH):
-        raise FileNotFoundError(
+        raise SchemaLoadError(
             f"{SCHEMA_JSON_PATH} not found.\n"
             "Please run: python src/generate_schema.py"
         )
 
-    with open(SCHEMA_JSON_PATH, 'r', encoding='utf-8') as f:
-        schema_data = json.load(f)
+    try:
+        with open(SCHEMA_JSON_PATH, 'r', encoding='utf-8') as f:
+            schema_data = json.load(f)
 
-    return schema_data.get('llm_prompt', '')
+        _SCHEMA_CACHE = schema_data.get('llm_prompt', '')
+
+        if not _SCHEMA_CACHE:
+            raise SchemaLoadError("Empty llm_prompt in schema_info.json")
+
+        logger.info("Schema info loaded and cached")
+        return _SCHEMA_CACHE
+
+    except json.JSONDecodeError as e:
+        raise SchemaLoadError(f"Invalid JSON in schema file: {e}")
 
 # def mask_pii_in_query_result(sql_query: str, result_str: str) -> str:
 #     """
@@ -48,20 +99,40 @@ def load_schema_info():
 #     return masked_result
 
 def read_question(state: SQLAgentState) -> dict:
+    """
+    Extract user question from the last message in state.
 
+    Handles both simple string messages and multimodal content blocks
+    (text, images, etc.). This is the entry point of the workflow.
+
+    Args:
+        state: Current workflow state
+
+    Returns:
+        Dictionary with 'user_question' key
+
+    Raises:
+        ValidationError: If message format is invalid
+
+    Node Position: START → read_question → intent_classification
+    """
     messages = state.get("messages", [])
 
-    if messages:
-        last_message = messages[-1]
+    if not messages:
+        logger.warning("No messages in state")
+        return {"user_question": None}
 
+    last_message = messages[-1]
+
+    try:
+        # Extract content from message
         if isinstance(last_message, dict):
             content = last_message.get('content')
         else:
             content = last_message.content
 
-        # Handle multimodal content (list of content blocks)
+        # Handle multimodal content (list of blocks)
         if isinstance(content, list):
-            # Extract text from first text content block
             for block in content:
                 if isinstance(block, dict) and block.get('type') == 'text':
                     content = block.get('text', '')
@@ -70,56 +141,127 @@ def read_question(state: SQLAgentState) -> dict:
                     content = block
                     break
             else:
+                # No text block found
                 content = str(content[0]) if content else ''
 
+        # Validate content type
+        if not isinstance(content, str):
+            raise ValidationError(
+                f"Invalid message content type: {type(content)}",
+                details={'content': str(content)[:100]}
+            )
+
+        logger.info(f"Question extracted: {content[:50]}...")
         return {"user_question": content}
 
-    return {}
+    except Exception as e:
+        logger.error(f"Failed to extract question: {e}")
+        raise ValidationError(f"Message extraction failed: {e}")
 
 def intent_classification(state: SQLAgentState) -> dict:
-    
-    user_question = state['user_question']
+    """
+    Classify user intent as 'sql' or 'general'.
 
-    intent_prompt = """Analyze the following input and classify it into one of two categories:
+    Determines whether the question requires database query (sql)
+    or general conversation (general). This routing decision affects
+    the entire workflow path.
 
-    sql - If the user wants to fetch, count, analyze, or look up specific data from a database.
-    general - If the input is a greeting, a clarifying question, a coding request, or casual chat.
+    Args:
+        state: Current workflow state (requires user_question)
+
+    Returns:
+        Dictionary with 'intent' key ('sql' or 'general')
+
+    Raises:
+        ValidationError: If user_question is missing or invalid
+
+    Node Position: read_question → intent_classification → [sql/general branch]
+    """
+    user_question = state.get('user_question')
+
+    if not user_question:
+        raise ValidationError("Missing user_question in state")
+
+    # Improved prompt with few-shot examples
+    intent_prompt = """Classify user input into: sql or general
+
+    **Few-Shot Examples:**
+
+    User: "Show me top 10 records"
+    Classification: sql
+
+    User: "What is the total count?"
+    Classification: sql
+
+    User: "Which item has the highest value?"
+    Classification: sql
+
+    User: "Hello"
+    Classification: general
+
+    User: "What can you do?"
+    Classification: general
+
+    User: "Create a chart"
+    Classification: sql
+
+    User: "Compare A and B"
+    Classification: sql
 
     **Rules:**
-    - Even if the user does not use the word "SQL", if the intent requires data retrieval (e.g., "Who bought the most items?"), classify as [SQL].
-    - If the request is ambiguous but leans towards asking for information likely stored in a table, classify as [SQL].
+    - ANY question about data, numbers, rankings, comparisons → sql
+    - ONLY greetings (hello/hi) or capability questions (what can you do) → general
+    - DEFAULT → sql
 
-    **Output:**
-    Return ONLY the class label `sql` or `general`. Do not provide explanations."""
-    
-    prompt_template = ChatPromptTemplate.from_messages([
-        ("system", "{intent_prompt}"),
-        ("human", "{user_question}")
-    ])
+    Return ONLY the word sql or general - no markdown, no explanations, no punctuation."""
 
-    final_prompt_value = prompt_template.invoke({
-        "intent_prompt": intent_prompt,
-        "user_question": user_question
-    })
+    try:
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", "{intent_prompt}"),
+            ("human", "{user_question}")
+        ])
 
-    response = llm.invoke(final_prompt_value)
-    
-    intent = response.content
-    intent = intent.replace("'", "").strip()
-    
-    return {
-        "intent": intent
-    }
+        final_prompt_value = prompt_template.invoke({
+            "intent_prompt": intent_prompt,
+            "user_question": user_question
+        })
+
+        response = llm.invoke(final_prompt_value)
+
+        # Clean markdown formatting (remove **, `, ', etc.)
+        intent = response.content.strip().lower()
+        intent = intent.replace("*", "").replace("`", "").replace("'", "").replace('"', "").strip()
+
+        # Validate intent
+        if intent not in ['sql', 'general']:
+            logger.warning(f"Invalid intent '{response.content.strip()}', defaulting to 'general'")
+            intent = 'general'
+
+        logger.info(f"Intent classified: {intent} for question: {user_question[:50]}")
+        return {"intent": intent}
+
+    except Exception as e:
+        logger.error(f"Intent classification failed: {e}")
+        # Fallback to general intent on error
+        logger.warning("Falling back to 'general' intent due to error")
+        return {"intent": "general"}
 
 def generate_general_response(state: SQLAgentState) -> dict:
-    
+
     user_question = state['user_question']
 
-    general_prompt = f"""You are a helpful data analyst assistant.
-    User said: "{user_question}"
-    
-    Respond politely. If they ask about your capability, say you can help analyze sales data.
-    """
+    general_prompt = f"""You are a database query assistant. You ONLY answer questions using the connected database.
+
+User question: "{user_question}"
+
+**Critical Rules:**
+- You can ONLY answer questions based on data in the database
+- NEVER use web search or general knowledge
+- If the user asks about capabilities, explain you analyze data from the connected database
+- If greeting (hello/hi), respond politely and offer to help with database queries
+- For any other question, respond: "I can only answer questions based on the database. Please ask a data-related question."
+
+Respond briefly and clearly."""
 
     response = llm.invoke(general_prompt)
 
@@ -127,162 +269,330 @@ def generate_general_response(state: SQLAgentState) -> dict:
         "messages": [response]
     }
 
-def generate_SQL(state: SQLAgentState) -> dict:
 
-    user_question = state['user_question']
-
-    # Load pre-generated schema info
-    schema_info = load_schema_info()
-
-    initial_prompt = f"""You are an expert data engineer.
-    Convert user questions into valid PostgreSQL queries.
-
-    Here is the ACTUAL schema of the database:
-    {schema_info}
-
-    Rules:
-    1. Use ONLY the column names explicitly listed above.
-    2. Return ONLY the SQL query string.
-    3. If a table or column name contains mixed case letters (camelCase), you MUST enclose it in double quotes.
-    4. Example: Do not write `SELECT paymentMethod ...`. Write `SELECT "paymentMethod" ...`.
-    5. When the question asks for "total", "sum", or aggregated values, use appropriate aggregate functions (SUM, COUNT, AVG) with GROUP BY.
-    6. Example: "total quantity sold by product" requires `SELECT product, SUM(quantity) as total_quantity FROM table GROUP BY product`.
-    7. When ordering by an aggregated column, use the alias or column position in ORDER BY.
-    8. Always think about whether the question requires aggregation before writing the query.
+def _extract_table_names(parsed_query) -> Set[str]:
     """
-    
-    prompt_template = ChatPromptTemplate.from_messages([
-        ("system", "{initial_prompt}"),
-        ("human", "{user_question}")
-    ])
+    Extract table names from parsed SQL query.
 
-    final_prompt_value = prompt_template.invoke({
-        "initial_prompt": initial_prompt,
-        "user_question": user_question
-    })
+    Args:
+        parsed_query: sqlparse parsed SQL statement
 
-    response = llm.invoke(final_prompt_value)
-    
-    sql_query = response.content
-    sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
-    return {
-        "sql_query": sql_query
+    Returns:
+        Set of table names (lowercase)
+    """
+    tables = set()
+    from_seen = False
+
+    for token in parsed_query.tokens:
+        if from_seen:
+            if isinstance(token, (IdentifierList, Identifier)):
+                identifiers = token.get_identifiers() if isinstance(token, IdentifierList) else [token]
+                for ident in identifiers:
+                    # Get real table name (remove alias if present)
+                    if isinstance(ident, Identifier):
+                        table_name = ident.get_real_name()
+                    else:
+                        table_name = str(ident).split()[0]  # Take first word before alias
+                    tables.add(table_name.strip('"').strip('`').lower())
+                from_seen = False  # Only reset after finding identifier
+
+        if token.ttype is Keyword and token.value.upper() == 'FROM':
+            from_seen = True
+
+    return tables
+
+
+def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
+    """
+    Validate SQL query for safety and correctness.
+
+    Prevents SQL injection by checking for:
+    - Dangerous keywords (DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE)
+    - Multiple statements (semicolon-separated)
+    - Comments that might hide malicious code
+    - Table names not in schema
+
+    Args:
+        sql_query: SQL query string to validate
+        allowed_tables: Set of valid table names from schema
+
+    Returns:
+        True if query is safe
+
+    Raises:
+        SQLGenerationError: If query is unsafe or invalid
+    """
+    # Normalize query
+    query_upper = sql_query.upper()
+
+    # Check for dangerous keywords
+    dangerous_keywords = {
+        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER',
+        'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
     }
 
-def execute_SQL(state: SQLAgentState) -> dict:
+    for keyword in dangerous_keywords:
+        if f' {keyword} ' in f' {query_upper} ':
+            raise SQLGenerationError(
+                f"Forbidden SQL keyword: {keyword}",
+                details={'query': sql_query}
+            )
 
-    engine = get_db_engine()
-    sql_query = state['sql_query']
+    # Check for multiple statements (SQL injection vector)
+    # Allow trailing semicolon, but block multiple statements
+    sql_stripped = sql_query.rstrip(';').strip()
+    if ';' in sql_stripped:
+        raise SQLGenerationError(
+            "Multiple SQL statements not allowed",
+            details={'query': sql_query}
+        )
+
+    # Check for SQL comments (-- or /* */)
+    if '--' in sql_query or '/*' in sql_query:
+        raise SQLGenerationError(
+            "SQL comments not allowed",
+            details={'query': sql_query}
+        )
+
+    # Parse and validate table names
+    try:
+        parsed = sqlparse.parse(sql_query)[0]
+
+        # Extract table names from query
+        query_tables = _extract_table_names(parsed)
+
+        # Check if all tables are in schema
+        invalid_tables = query_tables - allowed_tables
+        if invalid_tables:
+            raise SQLGenerationError(
+                f"Unknown tables in query: {invalid_tables}",
+                details={'query': sql_query, 'allowed': list(allowed_tables)}
+            )
+
+        logger.info(f"SQL validation passed: {len(query_tables)} tables")
+        return True
+
+    except Exception as e:
+        raise SQLGenerationError(f"SQL parsing failed: {e}", details={'query': sql_query})
+
+
+def generate_SQL(state: SQLAgentState) -> dict:
+    """
+    Generate validated PostgreSQL query from user question.
+
+    Loads database schema and prompts LLM to create a valid SQL query.
+    Validates the generated query for safety before returning.
+
+    Args:
+        state: Current workflow state (requires user_question)
+
+    Returns:
+        Dictionary with 'sql_query' key
+
+    Raises:
+        ValidationError: If user_question missing
+        SchemaLoadError: If schema info unavailable
+        SQLGenerationError: If generated SQL is invalid/unsafe
+
+    Node Position: intent_classification[sql] → generate_SQL → execute_SQL
+    """
+    user_question = state.get('user_question')
+
+    if not user_question:
+        raise ValidationError("Missing user_question in state")
 
     try:
+        # Load schema (cached after first call)
+        schema_info = load_schema_info()
+
+        # Load allowed tables for validation
+        with open(SCHEMA_JSON_PATH, 'r') as f:
+            schema_data = json.load(f)
+        allowed_tables = set(schema_data['tables'].keys())
+
+        # Concise prompt with PostgreSQL-specific quoting rules
+        sql_prompt = f"""Generate PostgreSQL SELECT query.
+
+**Database Schema:**
+{schema_info}
+
+**CRITICAL PostgreSQL Quoting Rules:**
+- PostgreSQL converts unquoted identifiers to LOWERCASE
+- ALWAYS use double quotes around ALL column names, even after table aliases
+- Quote every column reference: alias."columnName" NOT alias.columnName
+
+**Examples:**
+CORRECT: SELECT s."first_name", s."customerID" FROM "sales_customers" s JOIN "sales_transactions" t ON s."customerID" = t."customerID"
+WRONG: SELECT s.first_name, s.customerID FROM "sales_customers" s JOIN "sales_transactions" t ON s.customerID = t.customerID
+
+**Query Rules:**
+1. Use ONLY tables/columns from schema above
+2. Use GROUP BY with aggregate functions (SUM, COUNT, AVG)
+3. ORDER BY aliases or column position for aggregates
+4. Return ONLY SQL query - no markdown, no explanations
+
+**User Question:** {user_question}
+
+**SQL Query:**"""
+
+        response = llm.invoke(sql_prompt)
+        sql_query = response.content.strip()
+
+        # Clean markdown formatting
+        sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+
+        # CRITICAL: Validate query safety
+        validate_sql_query(sql_query, allowed_tables)
+
+        logger.info(f"SQL generated and validated: {sql_query[:100]}...")
+        return {"sql_query": sql_query}
+
+    except (SchemaLoadError, SQLGenerationError, ValidationError) as e:
+        logger.error(f"SQL generation failed: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in SQL generation: {e}")
+        raise LLMError(f"SQL generation failed: {e}")
+
+def execute_SQL(state: SQLAgentState) -> dict:
+    """
+    Execute validated SQL query against PostgreSQL database.
+
+    Executes the validated SQL query and returns results as JSON.
+    Handles various SQL errors with specific error messages.
+    Prevents infinite retry loops by tracking retry count.
+
+    Args:
+        state: Current workflow state (requires sql_query)
+
+    Returns:
+        Dictionary with 'query_result' key (JSON string or error message)
+
+    Raises:
+        ValidationError: If sql_query missing
+
+    Node Position: generate_SQL → execute_SQL → [retry/success]
+    """
+    sql_query = state.get('sql_query')
+
+    if not sql_query:
+        raise ValidationError("Missing sql_query in state")
+
+    # Check retry count to prevent infinite loops
+    messages = state.get('messages', [])
+    retry_count = sum(1 for msg in messages
+                      if 'Error:' in str(getattr(msg, 'content', '')))
+
+    if retry_count >= MAX_RETRY_COUNT:
+        error_msg = f"Error: Maximum retry limit ({MAX_RETRY_COUNT}) exceeded. Query failed."
+        logger.error(f"Max retries exceeded for query: {sql_query}")
+        return {"query_result": error_msg}
+
+    try:
+        engine = get_cached_engine()
+        logger.info(f"Executing SQL (attempt {retry_count + 1}): {sql_query[:100]}...")
+
         with engine.connect() as conn:
             result = conn.execute(text(sql_query))
             rows = [dict(row._mapping) for row in result.fetchall()]
-            result_str = json.dumps(rows, default=str, ensure_ascii=False)
-            # Apply PII masking to query results
-            #masked_result = mask_pii_in_query_result(sql_query, result_str)
-            return {
-                "query_result": result_str
-            } #후에 result_str -> masked_result 변경 필요
-    
+
+        result_str = json.dumps(rows, default=str, ensure_ascii=False)
+        logger.info(f"Query succeeded: {len(rows)} rows")
+        return {"query_result": result_str}
+
+    except SQLAlchemyError as e:
+        # Database errors (syntax, connection, data type, etc.)
+        error_msg = f"Error: {str(e)}"
+        logger.warning(f"Database error: {e}")
+        return {"query_result": error_msg}
+
     except Exception as e:
-        return {
-            "query_result": f"Error: {str(e)}"
-        }
+        # Unexpected errors
+        error_msg = f"Error: {str(e)}"
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        return {"query_result": error_msg}
 
 def visualisation_request_classification(state: SQLAgentState) -> dict:
-    
-    user_question = state['user_question']
-    sql_result = state['query_result']
+    """Determine if chart is needed and select type"""
+    user_question = state.get('user_question', '')
+    sql_result = state.get('query_result', '')
+    intent = state.get('intent', '')
 
-    if state['intent'] == 'general' or \
-        ("Error:" in sql_result) or \
-        (sql_result in [None, '[]', '']):
-        return {
-        "plotly_data": None
-        }
-    
-    visualisation_request_prompt = f"""
-    
-    You are a data visualisation expert. Analyze the user's question and SQL result to determine if visualisation is needed.
+    # Skip visualization for non-SQL queries or errors
+    if intent != 'sql' or not sql_result or 'Error:' in sql_result:
+        logger.info("Skipping visualization (non-SQL or error)")
+        return {"plotly_data": None}
 
-    **Output Format (JSON only):**
-    {{{{
-    "visualise": "yes" or "no",
-    "chart_type": "bar" or "line" or "pie"
-    }}}}
+    if sql_result in ['[]', '', 'null']:
+        logger.info("Skipping visualization (empty result)")
+        return {"plotly_data": None}
 
-    **Chart Type Guidelines:**
-    - bar: Comparisons, rankings, top N items (e.g., "top 10 products", "sales by region")
-    - line: Time series, trends over time (e.g., "monthly revenue", "daily orders")
-    - pie: Proportions, percentages, composition (e.g., "market share", "distribution")
+    # Concise prompt
+    vis_prompt = f"""Analyze if result needs visualization.
 
-    **Decision Rules:**
-    - If the question explicitly mentions "chart", "plot", "visualize", "visualise", "graph", or "show" → visualise: yes
-    - However, if the question explicitly denies or prohibits visualisation → visualise: no
-    - If SQL result has only 1 row or is a simple count → visualise: no
-    - If the question asks for comparisons, trends, or distributions → visualise: yes
-    - If the question only needs a single number or text answer → visualise: no
-    - If SQL result shows multiple data points (3+ rows) and involves aggregation → visualise: yes
-    
-    **IMPORTANT:**
-    - Return ONLY valid JSON
-    - No explanations, no additional text
-    - If unsure about chart_type, default to "bar"
+**Question:** {user_question}
+**Result:** {sql_result[:200]}...
 
-    The SQL query returned the following result:
-    {sql_result}
+**Criteria:**
+- Keywords: "chart", "visualize", "compare", "trend" → yes
+- 3+ rows + aggregated data → yes
+- Single value → no
 
-    User Question: {user_question}
-    """
+**Chart Types:**
+- bar: Rankings, comparisons
+- line: Time series, trends
+- pie: Proportions
 
-    response = llm.invoke(visualisation_request_prompt)
-    
+Return ONLY JSON - no markdown, no explanations:
+{{"visualise": "yes" or "no", "chart_type": "bar" or "line" or "pie"}}"""
+
     try:
-        response_json = json.loads(response.content)
+        response = llm.invoke(vis_prompt)
+
+        # Clean markdown formatting (similar to SQL generation)
+        content = response.content.strip()
+        content = content.replace("```json", "").replace("```", "").strip()
+
+        response_json = json.loads(content)
+
+        if response_json.get('visualise') != 'yes':
+            return {"plotly_data": None}
+
+        chart_type = response_json.get('chart_type', 'bar')
+        if chart_type not in VALID_CHART_TYPES:
+            logger.warning(f"Invalid chart type '{chart_type}', using 'bar'")
+            chart_type = 'bar'
+
+        plotly_data = create_plotly_chart(sql_result, chart_type)
+
+        if plotly_data is None:
+            return {"plotly_data": None}
+
+        tool_message = ToolMessage(
+            content=plotly_data,
+            tool_call_id="call_visualisation_1",
+            name="create_plotly_chart"
+        )
+
+        logger.info(f"Chart created: {chart_type}")
+        return {"messages": [tool_message], "plotly_data": plotly_data}
+
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse LLM response as JSON")
+        return {"plotly_data": None}
     except Exception as e:
-        return {
-        "plotly_data": None
-        }
-    
-    if response_json['visualise'] == 'no':
-        return {
-        "plotly_data": None
-        }
-
-    chart_type = response_json['chart_type']
-
-    plotly_data = create_plotly_chart(
-        sql_result, 
-        chart_type
-    )
-
-    if plotly_data is None:
-        return {
-        "plotly_data": None
-        }
-    
-    tool_message = ToolMessage(
-        content=plotly_data,
-        tool_call_id="call_visulisaion_1",
-        name="create_plotly_chart"
-    )
-
-    return {
-        "messages": [tool_message],
-        "plotly_data": plotly_data
-        
-    }
+        logger.error(f"Visualization failed: {e}")
+        return {"plotly_data": None}
 
 def create_plotly_chart(sql_result, chart_type):
-    
+    """Generate Plotly chart JSON from SQL results"""
     try:
         sql_list = json.loads(sql_result)
-    except Exception:
+    except json.JSONDecodeError:
         try:
             sql_list = ast.literal_eval(sql_result)
         except Exception as e:
-            print(f"Error: {e}")
+            logger.warning(f"Failed to parse SQL result for charting: {e}")
             return None
     
     if not sql_list:
@@ -342,8 +652,7 @@ def pyodide_request_classification(state: SQLAgentState) -> dict:
 
     pyodide_keywords = [
         'correlation', 'statistics', 'analyze', 'analyse', 'describe', 'summary',
-        'std', 'mean', 'median', 'variance', 'average', 'distribution',
-        '상관관계', '통계', '분석', '요약', '평균', '표준편차', '분산'
+        'std', 'mean', 'median', 'variance', 'average', 'distribution'
     ]
 
     needs_pyodide = any(keyword in user_question.lower() for keyword in pyodide_keywords)
@@ -404,44 +713,40 @@ print(df.describe())
 
 
 def generate_response(state: SQLAgentState) -> dict:
+    """Generate natural language response from SQL results"""
+    question = state.get('user_question', '')
+    result = state.get('query_result', '')
 
-    question = state['user_question']
-    sql = state['sql_query']
-    result = state['query_result']
-
+    # Handle errors
     if "Error:" in result:
-        return {"messages": [HumanMessage(content=f"An error ocurrs in query processing.\n{result}")]}
+        logger.warning("Generating error response for user")
+        return {"messages": [HumanMessage(
+            content=f"I encountered an error while processing your query:\n{result}\n\nPlease try rephrasing your question."
+        )]}
 
-    response_prompt = f"""
-    You are a helpful data assistant. Answer the user's question based on the SQL result provided.
+    # Handle empty results
+    if result in ['[]', '', 'null']:
+        logger.info("Empty result, notifying user")
+        return {"messages": [HumanMessage(
+            content="No data found for your question. Please try a different query."
+        )]}
 
-    User asked: {question}
-    SQL Result: {result}
+    # Generate response with concise prompt
+    response_prompt = f"""Answer the user's question using the query results.
 
-    **Instructions:**
-    - Provide a clear, concise answer to the user's question
-    - Present the data in a natural, easy-to-read format
-    - DO NOT explain the SQL query or show the SQL code
-    - DO NOT provide Python code or implementation details
-    - DO NOT give unnecessary technical explanations
-    - If the result is empty, say "No data found"
-    - Keep your response brief and focused on answering the question
+**Question:** {question}
+**Results:** {result[:1000]}
 
-    Answer the question directly using the SQL result.
-    """
+**Guidelines:**
+- Direct, clear answer
+- Natural, readable format
+- NO SQL code or technical details
+- Summarize if many results
+- Use bullet points for readability
 
+**Answer:**"""
 
-    # **CRITICAL PRIVACY REQUIREMENT:** -> To be included in response_prompt above 
-    # - DO NOT include any personal names (first names, last names) in your response
-    # - If the data contains [NAME_REDACTED], acknowledge that personal information has been protected for privacy
-    # - Focus on aggregate statistics, counts, and trends rather than individual identities
-    # Please answer the user's question using the SQL Result while respecting privacy.
-    
-    
     response = llm.invoke(response_prompt)
-
-    # Additional safety check: mask any names that might have slipped through (Defense in Depth)
-    # final_response = re.sub(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b', '[NAME_REDACTED]', response.content)
-    # response.content = final_response 
+    logger.info("Response generated successfully")
 
     return {"messages": [response]}

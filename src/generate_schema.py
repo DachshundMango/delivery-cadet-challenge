@@ -1,7 +1,8 @@
 import os
 import json
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import Engine, text
+from src.db import get_db_engine
 
 load_dotenv()
 
@@ -12,13 +13,7 @@ SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'schema_info.json')
 SCHEMA_MD_PATH = os.path.join(SRC_DIR, 'schema_info.md')
 
 
-def get_db_engine():
-    """Create database engine"""
-    DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:5432/{os.getenv('DB_NAME')}"
-    return create_engine(DB_URL)
-
-
-def load_keys_config():
+def load_keys_config() -> dict:
     """Load keys.json configuration"""
     if not os.path.exists(KEYS_PATH):
         raise FileNotFoundError(f"{KEYS_PATH} not found. Run transform_data.py first.")
@@ -27,7 +22,7 @@ def load_keys_config():
         return json.load(f)
 
 
-def get_column_info(engine, table_name):
+def get_column_info(engine: Engine, table_name: str) -> list[tuple[str, str]]:
     """Get column information from database"""
     query = """
     SELECT column_name, data_type
@@ -45,7 +40,7 @@ def get_column_info(engine, table_name):
         return []
 
 
-def generate_schema_json(keys_config, engine):
+def generate_schema_json(keys_config: dict, engine: Engine) -> dict:
     """Generate structured schema as JSON"""
     schema = {}
 
@@ -66,7 +61,7 @@ def generate_schema_json(keys_config, engine):
     return schema
 
 
-def generate_schema_markdown(schema):
+def generate_schema_markdown(schema: dict) -> str:
     """Generate human-readable schema as Markdown"""
     lines = ["# Database Schema\n"]
     lines.append("Generated from keys.json and PostgreSQL information_schema\n")
@@ -98,35 +93,35 @@ def generate_schema_markdown(schema):
     return "".join(lines)
 
 
-def generate_schema_text_for_llm(schema):
+def generate_schema_text_for_llm(schema: dict) -> str:
     """Generate text format schema for LLM consumption"""
     lines = []
 
     for idx, (table_name, info) in enumerate(schema.items(), 1):
-        lines.append(f"{idx}. Table '{table_name}'")
+        lines.append(f'{idx}. Table "{table_name}"')
 
         # Primary Key
         if info['pk']:
-            lines.append(f"   - Primary Key: {info['pk']}")
+            lines.append(f'   - Primary Key: "{info["pk"]}"')
 
         # Foreign Keys
         if info['fks']:
             lines.append(f"   - Foreign Keys:")
             for fk in info['fks']:
-                lines.append(f"     - {fk['col']} -> {fk['ref_table']}({fk['ref_col']})")
+                lines.append(f'     - "{fk["col"]}" -> "{fk["ref_table"]}"("{fk["ref_col"]}")')
 
         # Columns
         if info['columns']:
             lines.append(f"   - Columns:")
             for col in info['columns']:
-                lines.append(f"     - {col['name']} ({col['type']})")
+                lines.append(f'     - "{col["name"]}" ({col["type"]})')
 
         lines.append("")  # Empty line between tables
 
     return "\n".join(lines)
 
 
-def main():
+def main() -> None:
     """Generate schema files from keys.json and database"""
     print("="*60)
     print("SCHEMA GENERATION")

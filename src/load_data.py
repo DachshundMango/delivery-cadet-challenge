@@ -2,31 +2,17 @@ import os
 import glob
 import json
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import Engine, text
 from dotenv import load_dotenv
-from sqlalchemy.sql.elements import False_
-from sqlalchemy.sql.expression import table
+from src.db import get_db_engine
 
-
-load_dotenv()
-
-DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:{5432}/{os.getenv('DB_NAME')}" 
+load_dotenv() 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 
-def get_engine():
-    """Generate and return SQLAlchemy Engine instance"""
-    try:
-        engine = create_engine(DB_URL)
-        print("✅ DB connection succeeded.")
-        return engine
-    except Exception as e:
-        print(f"❌ DB connection failed: {e}")
-        raise e
-
-def load_csv_to_db(file_path, table_name, engine):
+def load_csv_to_db(file_path: str, table_name: str, engine: Engine) -> None:
     
     try:
         print(f"📂 Loading {table_name}...")
@@ -37,7 +23,7 @@ def load_csv_to_db(file_path, table_name, engine):
     except Exception as e:
         print(f"❌ Error loading {table_name}: {e}")
 
-def add_primary_key(keys, table_name, engine) -> bool:
+def add_primary_key(keys: dict, table_name: str, engine: Engine) -> bool:
 
     table = str(table_name)
 
@@ -65,7 +51,7 @@ def add_primary_key(keys, table_name, engine) -> bool:
         print(f" Table loaded without PK")
         return True
 
-def add_foreign_key(keys, table_name, engine) -> bool:
+def add_foreign_key(keys: dict, table_name: str, engine: Engine) -> bool:
 
     table = str(table_name)
     
@@ -101,8 +87,8 @@ def add_foreign_key(keys, table_name, engine) -> bool:
 
     return failed
 
-def main():
-    engine = get_engine()
+def main() -> None:
+    engine = get_db_engine()
     files = glob.glob(os.path.join(DATA_DIR, '*.csv'))
     keys_json = os.path.join(SRC_DIR, 'keys.json')
 

@@ -2,9 +2,12 @@ import os
 import json
 from dotenv import load_dotenv
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from src.core.db import get_db_engine
+from src.core.logger import setup_logger
 
 load_dotenv()
+logger = setup_logger('cadet.generate_schema')
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
@@ -36,8 +39,8 @@ def get_column_info(engine: Engine, table_name: str) -> list[tuple[str, str]]:
         with engine.connect() as conn:
             result = conn.execute(text(query), {"table_name": table_name})
             return [(row[0], row[1]) for row in result]
-    except Exception as e:
-        print(f"Warning: Could not get columns for {table_name}: {e}")
+    except (SQLAlchemyError, AttributeError) as e:
+        logger.warning(f"Could not get columns for {table_name}: {e}")
         return []
 
 
@@ -132,12 +135,12 @@ def main() -> None:
         # Load keys.json
         print("\n[1/4] Loading keys.json...")
         keys_config = load_keys_config()
-        print(f"✓ Loaded {len(keys_config)} tables")
+        print(f"Loaded {len(keys_config)} tables")
 
         # Connect to DB
         print("\n[2/4] Connecting to database...")
         engine = get_db_engine()
-        print("✓ Connected")
+        print("Connected")
 
         # Generate schema
         print("\n[3/4] Generating schema...")
@@ -151,36 +154,38 @@ def main() -> None:
 
         # Generate markdown
         markdown = generate_schema_markdown(schema)
-        print("✓ Schema generated")
+        print("Schema generated")
 
         # Write files
         print("\n[4/4] Writing schema files...")
 
         with open(SCHEMA_JSON_PATH, 'w', encoding='utf-8') as f:
             json.dump(schema_with_text, f, indent=2)
-        print(f"✓ {SCHEMA_JSON_PATH}")
+        print(f"Wrote {SCHEMA_JSON_PATH}")
 
         with open(SCHEMA_MD_PATH, 'w', encoding='utf-8') as f:
             f.write(markdown)
-        print(f"✓ {SCHEMA_MD_PATH}")
+        print(f"Wrote {SCHEMA_MD_PATH}")
 
         print("\n" + "="*60)
-        print("✓ SCHEMA GENERATION COMPLETE")
+        print("SCHEMA GENERATION COMPLETE")
         print("="*60)
         print(f"\nGenerated files:")
         print(f"  - {SCHEMA_JSON_PATH} (for SQL Agent)")
         print(f"  - {SCHEMA_MD_PATH} (for human review)")
 
     except FileNotFoundError as e:
-        print(f"\n✗ Error: {e}")
+        logger.error(f"File not found: {e}")
+        print(f"\nError: {e}")
         print("\nPlease run the pipeline in order:")
-        print("  1. python src/profiler.py")
-        print("  2. python src/relationship_discovery.py")
-        print("  3. python src/load_data.py")
-        print("  4. python src/transform_data.py")
-        print("  5. python src/generate_schema.py  ← You are here")
-    except Exception as e:
-        print(f"\n✗ Error: {e}")
+        print("  1. python -m src.data_pipeline.profiler")
+        print("  2. python -m src.data_pipeline.relationship_discovery")
+        print("  3. python -m src.data_pipeline.load_data")
+        print("  4. python -m src.data_pipeline.transform_data")
+        print("  5. python -m src.data_pipeline.generate_schema")
+    except (SQLAlchemyError, json.JSONDecodeError, OSError) as e:
+        logger.error(f"Schema generation failed: {e}")
+        print(f"\nError: {e}")
 
 
 if __name__ == '__main__':

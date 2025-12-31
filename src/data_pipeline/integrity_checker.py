@@ -2,13 +2,13 @@ import os
 import glob
 import json
 import pandas as pd
-from pprint import pprint
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 CLEAN_DATA_DIR = os.path.join(BASE_DIR, 'clean_data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
-KEYS = os.path.join(SRC_DIR, "keys.json")
+CONFIG_DIR = os.path.join(SRC_DIR, 'config')
+KEYS = os.path.join(CONFIG_DIR, 'keys.json')
 
 
 def load_keys_config(keys_path) -> dict:

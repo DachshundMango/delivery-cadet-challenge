@@ -1,8 +1,8 @@
 """Security tests for SQL injection prevention and input validation"""
 
 import pytest
-from src.nodes import validate_sql_query
-from src.errors import SQLGenerationError
+from src.core.validation import validate_sql_query
+from src.core.errors import SQLGenerationError
 
 
 class TestSQLInjectionPrevention:

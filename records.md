@@ -1,4 +1,4 @@
-컬럼 큰따옴표 때문에 힘들었다.
+# 컬럼 큰따옴표 때문에 힘들었다.
 
 Ask questions (enter q if you want to exit): Which country generates the highest total revenue? Show all countries ranked by revenue?
 
@@ -639,4 +639,6 @@ langgraph.errors.GraphRecursionError: Recursion limit of 25 reached without hitt
 For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
 
 
-프롬프트를 따로 빼넀다. 
+# 프롬프트 스크립트를 따로 빼넀다. 
+# 현재 로직이 LLM 기반이다 -> 즉 어떤걸 프롬프트로 하고 어떤걸 내부 백엔드로 로직으로 짯는지 그 구분과 이유를 설명해야함
+# 시각화 여부 너무 경직된 키워드 -> 좀더 자연스럽게 해야한다는걸 깨달음

@@ -4,6 +4,7 @@ import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
+CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 
 def print_title(input):
     print(f"\n{'='*50}")
@@ -70,7 +71,7 @@ def interactive_pk_selection(data_profile) -> dict:
                 continue
 
             selected_pk = columns_list[user_select_int][1]
-            print(f"✓ {table_name}.{selected_pk}")
+            print(f"Selected: {table_name}.{selected_pk}")
             pk_select_result[table_name] = selected_pk
             break
 
@@ -141,8 +142,8 @@ def interactive_fk_matching(data_profile, pk_select_result) -> dict:
                 "references_table": target_table,
                 "references_column": target_pk
             })
-            
-            print(f"✓ {table_name}.{fk_col} → {target_table}.{target_pk}")
+
+            print(f"Added FK: {table_name}.{fk_col} -> {target_table}.{target_pk}")
     
     return fk_relationships
 
@@ -150,7 +151,7 @@ def interactive_fk_matching(data_profile, pk_select_result) -> dict:
 def save_keys_config(pk_select_result, fk_relationships, output_path=None):
 
     if output_path is None:
-        output_path = os.path.join(SRC_DIR, 'keys.json')
+        output_path = os.path.join(CONFIG_DIR, 'keys.json')
 
     keys_config = {}
 
@@ -176,21 +177,13 @@ def save_keys_config(pk_select_result, fk_relationships, output_path=None):
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(keys_config, f, indent=2, ensure_ascii=False)
 
-    print(f"\n✓ Saved to {output_path}")
+    print(f"\nSaved to {output_path}")
     return output_path
-
-
-def load_data_profile(file_path):
-
-    with open(file_path, 'r', encoding='utf-8') as f:
-        data_profile = json.load(f)
-
-    return data_profile
 
 
 def main():
 
-    profile_path = os.path.join(SRC_DIR, 'data_profile.json')
+    profile_path = os.path.join(CONFIG_DIR, 'data_profile.json')
 
     if not os.path.exists(profile_path):
         print(f"Error: {profile_path} not found")

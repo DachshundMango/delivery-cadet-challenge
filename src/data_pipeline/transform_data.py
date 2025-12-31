@@ -1,21 +1,16 @@
 import os
 import json
 from collections import defaultdict
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
+from src.core.db import get_db_engine
 
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
-KEYS_PATH = os.path.join(SRC_DIR, 'keys.json')
-
-DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:5432/{os.getenv('DB_NAME')}"
-
-
-def get_engine():
-    """Create database engine"""
-    return create_engine(DB_URL)
+CONFIG_DIR = os.path.join(SRC_DIR, 'config')
+KEYS_PATH = os.path.join(CONFIG_DIR, 'keys.json')
 
 
 def load_keys_config():
@@ -116,11 +111,11 @@ def update_keys_from_db(engine):
         with open(KEYS_PATH, 'w', encoding='utf-8') as f:
             json.dump(new_keys, f, indent=2)
 
-        print(f"✓ keys.json updated with {len(new_keys)} tables")
+        print(f"keys.json updated with {len(new_keys)} tables")
         return True
 
     except Exception as e:
-        print(f"✗ Failed to update keys.json: {str(e)[:100]}")
+        print(f"Failed to update keys.json: {str(e)[:100]}")
         return False
 
 
@@ -152,17 +147,17 @@ def verify_transformation(engine, keys_config):
                     orphan_count = result[0]
 
                 if orphan_count > 0:
-                    print(f"⚠️  {table_name}.{col}: {orphan_count} orphans remain")
+                    print(f"WARNING: {table_name}.{col}: {orphan_count} orphans remain")
                     issue_count += 1
             except Exception as e:
-                print(f"⚠️  Could not verify {table_name}.{col}: {str(e)[:60]}")
+                print(f"WARNING: Could not verify {table_name}.{col}: {str(e)[:60]}")
                 issue_count += 1
 
     if issue_count == 0:
-        print("✓ All integrity issues resolved!")
+        print("All integrity issues resolved!")
         return True
     else:
-        print(f"\n⚠️  {issue_count} issues still remain")
+        print(f"\nWARNING: {issue_count} issues still remain")
         return False
 
 
@@ -177,7 +172,7 @@ def main():
     print("Type 'done' when finished to verify and update keys.json.")
     print("Type 'quit' to exit without verification.\n")
 
-    engine = get_engine()
+    engine = get_db_engine()
     query_count = 0
 
     while True:
@@ -197,10 +192,10 @@ def main():
             success, result = execute_query(engine, query)
 
             if success:
-                print(f"✓ Query executed: {result} rows affected")
+                print(f"Query executed: {result} rows affected")
                 query_count += 1
             else:
-                print(f"✗ Query failed: {result}")
+                print(f"Query failed: {result}")
 
         except KeyboardInterrupt:
             print("\n\nExiting...")
@@ -220,18 +215,18 @@ def main():
 
         if success:
             print("\n" + "="*60)
-            print("✓ TRANSFORMATION COMPLETE - ALL VERIFIED")
+            print("TRANSFORMATION COMPLETE - ALL VERIFIED")
             print("="*60)
             print("\nYou can now run the SQL Agent:")
             print("  python src/main.py")
         else:
             print("\n" + "="*60)
-            print("⚠️  TRANSFORMATION COMPLETE - VERIFICATION FAILED")
+            print("TRANSFORMATION COMPLETE - VERIFICATION FAILED")
             print("="*60)
             print("Some issues remain. Manual review required.")
     else:
         print("\n" + "="*60)
-        print("✓ TRANSFORMATION COMPLETE")
+        print("TRANSFORMATION COMPLETE")
         print("="*60)
 
 

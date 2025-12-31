@@ -79,6 +79,10 @@ User question: "{user_question}"
 - If greeting (hello/hi), respond politely and offer to help with database queries
 - For any other question, respond: "I can only answer questions based on the database. Please ask a data-related question."
 
+**CRITICAL - Privacy Protection:**
+- Replace ONLY individual customer/person names with "Person #N" (with numbering)
+- Keep franchise names, supplier names, company names unchanged
+
 Respond briefly and clearly."""
 
 
@@ -163,23 +167,30 @@ def get_visualization_prompt(user_question: str, sql_result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = sql_result[:200] + "..." if len(sql_result) > 200 else sql_result
 
-    return f"""Analyze if result needs visualization.
+    return f"""Should this question be answered with a visualization?
 
 **Question:** {user_question}
-**Result:** {truncated_result}
+**Data sample:** {truncated_result}
 
-**Criteria:**
-- Keywords: "chart", "visualize", "compare", "trend" → yes
-- 3+ rows + aggregated data → yes
-- Single value → no
+**Return "yes" if:**
+1. User EXPLICITLY asks for: "chart", "visualize", "plot", "graph", "visualization"
+2. Question implies visual comparison would be helpful (e.g., "compare across...", "trends over time", "distribution of...")
+3. Data has multiple categories/time points that benefit from visual representation
 
-**Chart Types:**
-- bar: Rankings, comparisons
-- line: Time series, trends
-- pie: Proportions
+**Return "no" if:**
+1. Simple lookup or count ("how many", "what is the total")
+2. User asks to "list" or "show" without visual intent
+3. Single value answer
 
-Return ONLY JSON - no markdown, no explanations:
-{{"visualise": "yes" or "no", "chart_type": "bar" or "line" or "pie"}}"""
+**Be conservative:** When in doubt, prefer "no". Only suggest visualization when it clearly adds value.
+
+**Chart type:**
+- Comparison/ranking data → "bar"
+- Time series/trends → "line"
+- Parts of whole/proportions → "pie"
+
+Return ONLY JSON:
+{{"visualise": "yes", "chart_type": "bar"}}"""
 
 
 # ===============================================================
@@ -223,6 +234,65 @@ print(df.describe())
 
 
 # ===============================================================
+# Data Masking (for charts and privacy)
+# ===============================================================
+
+def get_data_masking_prompt(sql_result: str) -> str:
+    """
+    Generate prompt to mask personal names in SQL result data.
+
+    Args:
+        sql_result: JSON string of SQL query results
+
+    Returns:
+        Formatted prompt string
+    """
+    return f"""You are a data privacy filter. Your task is to identify and mask INDIVIDUAL PERSON NAMES while preserving business/organization names.
+
+**Input Data:**
+{sql_result}
+
+**Task:**
+Look at each value in the data. If it appears to be an INDIVIDUAL PERSON'S NAME (like "John Smith", "Alice", "Robert Johnson"), replace it with "Person #N" with sequential numbering.
+
+**What to MASK (individual person names):**
+- Typical human first names: John, Sarah, Michael, Emily, David
+- Full names with first + last: "John Smith", "Alice Brown"
+- Single person names in name fields
+
+**What NOT to mask (business/organizational names):**
+- Business names: "Pizza Palace", "Coffee Corner", "Fresh Foods Inc."
+- Stores/franchises: "Downtown Bakery", "Sunset Cafe"
+- Brands/products: "Chocolate Delight", "Vanilla Dream"
+- Companies: "ABC Corporation", "XYZ Supplies"
+- Locations: "New York", "London", "Main Street"
+
+**Key distinction:**
+- Person names sound like individual humans (John, Sarah, Michael)
+- Business names sound like organizations/places/brands (Palace, Corner, Foods, Inc.)
+
+**IMPORTANT:** If the same person has multiple name fields, keep only the FIRST field as "Person #N" and DELETE the others.
+
+**Examples:**
+
+Example 1 - Mask person names:
+Input: [{{"name": "John Smith", "spending": 1000}}, {{"name": "Emily Davis", "spending": 500}}]
+Output: [{{"name": "Person #1", "spending": 1000}}, {{"name": "Person #2", "spending": 500}}]
+
+Example 2 - Keep business names:
+Input: [{{"name": "Pizza Palace", "reviews": 100}}, {{"name": "Coffee Corner", "reviews": 80}}]
+Output: [{{"name": "Pizza Palace", "reviews": 100}}, {{"name": "Coffee Corner", "reviews": 80}}]
+
+Example 3 - Mixed data:
+Input: [{{"customer": "Alice Brown", "store": "Sunset Bakery", "amount": 50}}]
+Output: [{{"customer": "Person #1", "store": "Sunset Bakery", "amount": 50}}]
+
+Return ONLY the modified JSON array - no markdown, no explanations.
+
+**Masked Data:**"""
+
+
+# ===============================================================
 # Response Generation
 # ===============================================================
 
@@ -252,6 +322,29 @@ def get_response_generation_prompt(question: str, result: str) -> str:
 - Summarize if many results
 - Use bullet points for readability
 
+**CRITICAL - Privacy Protection (MANDATORY):**
+⚠️ YOU MUST NEVER SHOW ANY INDIVIDUAL PERSON NAMES IN YOUR RESPONSE ⚠️
+
+- SCAN the entire query result for ANY individual customer/person names
+- Replace EVERY SINGLE occurrence with "Person #N" using sequential numbering
+- This applies to: firstName, lastName, fullName, customerName, name fields
+- DO NOT mask: franchise names, supplier names, company names, business names, product names, location names
+
+**Examples:**
+❌ WRONG: "The top customer is John Smith with $1000"
+✅ CORRECT: "The top customer is Person #1 with $1000"
+
+❌ WRONG: "1. Alice Johnson - $800, 2. Bob Williams - $500"
+✅ CORRECT: "1. Person #1 - $800, 2. Person #2 - $500"
+
+❌ WRONG: "Customers include Sarah, Michael, and David"
+✅ CORRECT: "Customers include Person #1, Person #2, and Person #3"
+
+✅ CORRECT: "Top franchise: Pizza Palace" (business name, keep as-is)
+✅ CORRECT: "Supplier: Fresh Foods Inc." (company name, keep as-is)
+
+**BEFORE you write your answer, VERIFY that no individual person names appear in your response.**
+
 **Answer:**"""
 
 
@@ -265,5 +358,6 @@ __all__ = [
     'get_sql_generation_prompt',
     'get_visualization_prompt',
     'get_pyodide_analysis_prompt',
+    'get_data_masking_prompt',
     'get_response_generation_prompt',
 ]

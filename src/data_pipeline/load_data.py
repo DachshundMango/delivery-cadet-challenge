@@ -14,15 +14,15 @@ SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 
 def load_csv_to_db(file_path: str, table_name: str, engine: Engine) -> None:
-    
+
     try:
-        print(f"📂 Loading {table_name}...")
+        print(f"Loading {table_name}...")
         df = pd.read_csv(file_path)
-        df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)       
-        print(f"   -> {table_name} : {len(df)} rows loaded.")
+        df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
+        print(f"   -> {table_name}: {len(df)} rows loaded")
 
     except Exception as e:
-        print(f"❌ Error loading {table_name}: {e}")
+        print(f"Error loading {table_name}: {e}")
 
 def add_primary_key(keys: dict, table_name: str, engine: Engine) -> bool:
 
@@ -128,11 +128,11 @@ def main() -> None:
     if pk_failed or fk_failed:
         print("\n" + "="*60)
         if pk_failed:
-            print("⚠️  Primary key constraints failed")
+            print("WARNING: Primary key constraints failed")
         if fk_failed:
-            print("⚠️  Foreign key constraints failed")
+            print("WARNING: Foreign key constraints failed")
         print("\nRun integrity checker for detailed diagnosis:")
-        print("  python src/integrity_checker.py")
+        print("  python -m src.data_pipeline.integrity_checker")
         print("="*60)
 
 

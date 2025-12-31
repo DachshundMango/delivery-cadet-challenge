@@ -10,6 +10,7 @@ from src.agent.prompts import (
     get_sql_generation_prompt,
     get_visualization_prompt,
     get_pyodide_analysis_prompt,
+    get_data_masking_prompt,
     get_response_generation_prompt,
 )
 from src.core.logger import setup_logger
@@ -376,7 +377,13 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
             logger.warning(f"Invalid chart type '{chart_type}', using 'bar'")
             chart_type = 'bar'
 
-        plotly_data = create_plotly_chart(sql_result, chart_type)
+        # Mask personal names in chart data using LLM
+        masking_prompt = get_data_masking_prompt(sql_result)
+        masking_response = llm.invoke(masking_prompt)
+        masked_result = masking_response.content.strip()
+        masked_result = masked_result.replace("```json", "").replace("```", "").strip()
+
+        plotly_data = create_plotly_chart(masked_result, chart_type)
 
         if plotly_data is None:
             return {"plotly_data": None}
@@ -415,7 +422,6 @@ def create_plotly_chart(sql_result, chart_type):
     y_data = []
     
     for data in sql_list:
-
 
         if isinstance(data, dict):
             row_values = list(data.values())
@@ -463,9 +469,13 @@ def pyodide_request_classification(state: SQLAgentState) -> dict:
             "needs_pyodide": False
         }
 
+    # Only trigger for advanced statistical analysis that SQL cannot handle
     pyodide_keywords = [
-        'correlation', 'statistics', 'analyze', 'analyse', 'describe', 'summary',
-        'std', 'mean', 'median', 'variance', 'average', 'distribution'
+        'correlation',
+        'statistical analysis',
+        'standard deviation',
+        'variance',
+        'distribution analysis'
     ]
 
     needs_pyodide = any(keyword in user_question.lower() for keyword in pyodide_keywords)

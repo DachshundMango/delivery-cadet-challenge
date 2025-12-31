@@ -1,8 +1,7 @@
 import ast
 import os
 import json
-import re
-from typing import Set, Optional
+from typing import Optional
 from dotenv import load_dotenv
 from src.agent.state import SQLAgentState
 from src.agent.prompts import (
@@ -15,6 +14,7 @@ from src.agent.prompts import (
 )
 from src.core.logger import setup_logger
 from src.core.db import get_db_engine
+from src.core.validation import validate_sql_query
 from src.core.errors import (
     ValidationError,
     SQLGenerationError,
@@ -27,9 +27,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
 from sqlalchemy import create_engine, text, Engine
 from sqlalchemy.exc import SQLAlchemyError
-import sqlparse
-from sqlparse.sql import IdentifierList, Identifier
-from sqlparse.tokens import Keyword
 import plotly.express as px
 
 load_dotenv()
@@ -97,14 +94,6 @@ def load_schema_info() -> str:
     except json.JSONDecodeError as e:
         raise SchemaLoadError(f"Invalid JSON in schema file: {e}")
 
-# def mask_pii_in_query_result(sql_query: str, result_str: str) -> str:
-#     """
-#     Always apply name pattern matching, regardless of column names.
-#     Dataset-agnostic approach.
-#     """
-#     # 조건 체크 없이 항상 패턴 매칭 적용
-#     masked_result = re.sub(r"'([A-Z][a-z]+)'", "'[NAME_REDACTED]'", result_str)
-#     return masked_result
 
 def read_question(state: SQLAgentState) -> dict:
     """
@@ -236,112 +225,6 @@ def generate_general_response(state: SQLAgentState) -> dict:
     return {
         "messages": [response]
     }
-
-
-def _extract_table_names(parsed_query) -> Set[str]:
-    """
-    Extract table names from parsed SQL query.
-
-    Args:
-        parsed_query: sqlparse parsed SQL statement
-
-    Returns:
-        Set of table names (lowercase)
-    """
-    tables = set()
-    from_seen = False
-
-    for token in parsed_query.tokens:
-        if from_seen:
-            if isinstance(token, (IdentifierList, Identifier)):
-                identifiers = token.get_identifiers() if isinstance(token, IdentifierList) else [token]
-                for ident in identifiers:
-                    # Get real table name (remove alias if present)
-                    if isinstance(ident, Identifier):
-                        table_name = ident.get_real_name()
-                    else:
-                        table_name = str(ident).split()[0]  # Take first word before alias
-                    tables.add(table_name.strip('"').strip('`').lower())
-                from_seen = False  # Only reset after finding identifier
-
-        if token.ttype is Keyword and token.value.upper() == 'FROM':
-            from_seen = True
-
-    return tables
-
-
-def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
-    """
-    Validate SQL query for safety and correctness.
-
-    Prevents SQL injection by checking for:
-    - Dangerous keywords (DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE)
-    - Multiple statements (semicolon-separated)
-    - Comments that might hide malicious code
-    - Table names not in schema
-
-    Args:
-        sql_query: SQL query string to validate
-        allowed_tables: Set of valid table names from schema
-
-    Returns:
-        True if query is safe
-
-    Raises:
-        SQLGenerationError: If query is unsafe or invalid
-    """
-    # Normalize query
-    query_upper = sql_query.upper()
-
-    # Check for dangerous keywords
-    dangerous_keywords = {
-        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER',
-        'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
-    }
-
-    for keyword in dangerous_keywords:
-        if f' {keyword} ' in f' {query_upper} ':
-            raise SQLGenerationError(
-                f"Forbidden SQL keyword: {keyword}",
-                details={'query': sql_query}
-            )
-
-    # Check for multiple statements (SQL injection vector)
-    # Allow trailing semicolon, but block multiple statements
-    sql_stripped = sql_query.rstrip(';').strip()
-    if ';' in sql_stripped:
-        raise SQLGenerationError(
-            "Multiple SQL statements not allowed",
-            details={'query': sql_query}
-        )
-
-    # Check for SQL comments (-- or /* */)
-    if '--' in sql_query or '/*' in sql_query:
-        raise SQLGenerationError(
-            "SQL comments not allowed",
-            details={'query': sql_query}
-        )
-
-    # Parse and validate table names
-    try:
-        parsed = sqlparse.parse(sql_query)[0]
-
-        # Extract table names from query
-        query_tables = _extract_table_names(parsed)
-
-        # Check if all tables are in schema
-        invalid_tables = query_tables - allowed_tables
-        if invalid_tables:
-            raise SQLGenerationError(
-                f"Unknown tables in query: {invalid_tables}",
-                details={'query': sql_query, 'allowed': list(allowed_tables)}
-            )
-
-        logger.info(f"SQL validation passed: {len(query_tables)} tables")
-        return True
-
-    except Exception as e:
-        raise SQLGenerationError(f"SQL parsing failed: {e}", details={'query': sql_query})
 
 
 def generate_SQL(state: SQLAgentState) -> dict:

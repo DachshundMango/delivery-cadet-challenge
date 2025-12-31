@@ -13,7 +13,7 @@ from .errors import (
     LLMError,
 )
 from .db import get_db_engine
-from .validation import validate_user_input
+from .validation import validate_user_input, validate_sql_query
 
 __all__ = [
     # Logging
@@ -27,4 +27,5 @@ __all__ = [
     'get_db_engine',
     # Validation
     'validate_user_input',
+    'validate_sql_query',
 ]

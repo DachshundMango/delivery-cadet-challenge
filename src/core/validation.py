@@ -1,11 +1,22 @@
-"""Input validation utilities for user inputs"""
+"""Input validation utilities for user inputs and SQL queries"""
 
-from src.core.errors import ValidationError
+import json
+import os
+from typing import Set
+from src.core.errors import ValidationError, SQLGenerationError
 from src.core.logger import setup_logger
+import sqlparse
+from sqlparse.sql import IdentifierList, Identifier
+from sqlparse.tokens import Keyword
 
 logger = setup_logger('cadet.validation')
 
 MAX_QUESTION_LENGTH = 1000
+
+# File paths for schema validation
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SRC_DIR = os.path.join(BASE_DIR, 'src')
+SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'config', 'schema_info.json')
 
 
 def validate_user_input(user_input: str, field_name: str = "input") -> str:
@@ -47,3 +58,109 @@ def validate_user_input(user_input: str, field_name: str = "input") -> str:
 
     logger.debug(f"{field_name} validated successfully: {len(sanitized)} chars")
     return sanitized
+
+
+def _extract_table_names(parsed_query) -> Set[str]:
+    """
+    Extract table names from parsed SQL query.
+
+    Args:
+        parsed_query: sqlparse parsed SQL statement
+
+    Returns:
+        Set of table names (lowercase)
+    """
+    tables = set()
+    from_seen = False
+
+    for token in parsed_query.tokens:
+        if from_seen:
+            if isinstance(token, (IdentifierList, Identifier)):
+                identifiers = token.get_identifiers() if isinstance(token, IdentifierList) else [token]
+                for ident in identifiers:
+                    # Get real table name (remove alias if present)
+                    if isinstance(ident, Identifier):
+                        table_name = ident.get_real_name()
+                    else:
+                        table_name = str(ident).split()[0]  # Take first word before alias
+                    tables.add(table_name.strip('"').strip('`').lower())
+                from_seen = False  # Only reset after finding identifier
+
+        if token.ttype is Keyword and token.value.upper() == 'FROM':
+            from_seen = True
+
+    return tables
+
+
+def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
+    """
+    Validate SQL query for safety and correctness.
+
+    Prevents SQL injection by checking for:
+    - Dangerous keywords (DROP, DELETE, UPDATE, INSERT, ALTER, TRUNCATE)
+    - Multiple statements (semicolon-separated)
+    - Comments that might hide malicious code
+    - Table names not in schema
+
+    Args:
+        sql_query: SQL query string to validate
+        allowed_tables: Set of valid table names from schema
+
+    Returns:
+        True if query is safe
+
+    Raises:
+        SQLGenerationError: If query is unsafe or invalid
+    """
+    # Normalize query
+    query_upper = sql_query.upper()
+
+    # Check for dangerous keywords
+    dangerous_keywords = {
+        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER',
+        'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
+    }
+
+    for keyword in dangerous_keywords:
+        if f' {keyword} ' in f' {query_upper} ':
+            raise SQLGenerationError(
+                f"Forbidden SQL keyword: {keyword}",
+                details={'query': sql_query}
+            )
+
+    # Check for multiple statements (SQL injection vector)
+    # Allow trailing semicolon, but block multiple statements
+    sql_stripped = sql_query.rstrip(';').strip()
+    if ';' in sql_stripped:
+        raise SQLGenerationError(
+            "Multiple SQL statements not allowed",
+            details={'query': sql_query}
+        )
+
+    # Check for SQL comments (-- or /* */)
+    if '--' in sql_query or '/*' in sql_query:
+        raise SQLGenerationError(
+            "SQL comments not allowed",
+            details={'query': sql_query}
+        )
+
+    # Parse and validate table names
+    try:
+        parsed = sqlparse.parse(sql_query)[0]
+
+        # Extract table names from query
+        query_tables = _extract_table_names(parsed)
+
+        # Check if all tables are in schema
+        invalid_tables = query_tables - allowed_tables
+        if invalid_tables:
+            raise SQLGenerationError(
+                f"Unknown tables in query: {invalid_tables}",
+                details={'query': sql_query, 'allowed': list(allowed_tables)}
+            )
+
+        logger.info(f"SQL validation passed: {len(query_tables)} tables")
+        return True
+
+    except Exception as e:
+        raise SQLGenerationError(f"SQL parsing failed: {e}", details={'query': sql_query})

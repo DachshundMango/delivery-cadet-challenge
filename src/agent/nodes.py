@@ -10,7 +10,6 @@ from src.agent.prompts import (
     get_sql_generation_prompt,
     get_visualization_prompt,
     get_pyodide_analysis_prompt,
-    get_data_masking_prompt,
     get_response_generation_prompt,
 )
 from src.core.logger import setup_logger
@@ -30,6 +29,7 @@ from sqlalchemy import create_engine, text, Engine
 from sqlalchemy.exc import SQLAlchemyError
 import plotly.express as px
 
+# Automatically find .env file in the project root and load environment variables
 load_dotenv()
 logger = setup_logger('cadet.nodes')
 
@@ -94,6 +94,67 @@ def load_schema_info() -> str:
 
     except json.JSONDecodeError as e:
         raise SchemaLoadError(f"Invalid JSON in schema file: {e}")
+
+
+def apply_pii_masking(rows: list[dict]) -> list[dict]:
+    """
+    Apply deterministic PII masking to SQL results (Python-only, no LLM).
+
+    Loads PII column names from schema_info.json and masks matching columns
+    with "Person #N" format. Removes duplicate name fields (e.g., firstName + lastName).
+
+    Args:
+        rows: SQL query results as list of dicts
+
+    Returns:
+        Masked rows with PII replaced
+    """
+    if not rows:
+        return rows
+
+    # Load PII columns from schema_info.json
+    try:
+        with open(SCHEMA_JSON_PATH, 'r', encoding='utf-8') as f:
+            schema_data = json.load(f)
+        pii_columns_config = schema_data.get('pii_columns', {})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        logger.debug("No PII configuration found, skipping masking")
+        return rows
+
+    # Flatten all PII columns into a single set (table-agnostic matching)
+    pii_columns = set()
+    for table_pii in pii_columns_config.values():
+        pii_columns.update(table_pii)
+
+    if not pii_columns:
+        return rows
+
+    logger.info(f"Masking PII columns: {pii_columns}")
+
+    # Apply masking
+    masked_rows = []
+    person_counter = 1
+
+    for row in rows:
+        masked_row = {}
+        first_pii_found = False
+
+        for col_name, value in row.items():
+            if col_name in pii_columns:
+                if not first_pii_found:
+                    masked_row[col_name] = f"Person #{person_counter}"
+                    first_pii_found = True
+                # Skip other PII columns in same row (e.g., lastName after firstName)
+            else:
+                masked_row[col_name] = value
+
+        if first_pii_found:
+            person_counter += 1
+
+        masked_rows.append(masked_row)
+
+    logger.info(f"Masked {person_counter - 1} individuals")
+    return masked_rows
 
 
 def read_question(state: SQLAgentState) -> dict:
@@ -326,8 +387,11 @@ def execute_SQL(state: SQLAgentState) -> dict:
             result = conn.execute(text(sql_query))
             rows = [dict(row._mapping) for row in result.fetchall()]
 
-        result_str = json.dumps(rows, default=str, ensure_ascii=False)
-        logger.info(f"Query succeeded: {len(rows)} rows")
+        # Apply PII masking (deterministic, Python-only)
+        masked_rows = apply_pii_masking(rows)
+
+        result_str = json.dumps(masked_rows, default=str, ensure_ascii=False)
+        logger.info(f"Query succeeded: {len(masked_rows)} rows")
         return {"query_result": result_str}
 
     except SQLAlchemyError as e:
@@ -377,13 +441,8 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
             logger.warning(f"Invalid chart type '{chart_type}', using 'bar'")
             chart_type = 'bar'
 
-        # Mask personal names in chart data using LLM
-        masking_prompt = get_data_masking_prompt(sql_result)
-        masking_response = llm.invoke(masking_prompt)
-        masked_result = masking_response.content.strip()
-        masked_result = masked_result.replace("```json", "").replace("```", "").strip()
-
-        plotly_data = create_plotly_chart(masked_result, chart_type)
+        # sql_result is already PII-masked by execute_SQL node
+        plotly_data = create_plotly_chart(sql_result, chart_type)
 
         if plotly_data is None:
             return {"plotly_data": None}

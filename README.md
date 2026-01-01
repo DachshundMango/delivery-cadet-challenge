@@ -26,7 +26,11 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Relationship Discovery**: Intelligent FK relationship suggestions based on naming patterns
 
 ### Privacy & Security
-- **PII Masking**: Guardrail system to obscure personal names (currently disabled for testing)
+- **LLM-Powered PII Detection**: Automatic identification of personal information columns during schema generation
+- **Runtime PII Masking**: Personal names automatically replaced with `Person #1`, `Person #2`, etc. in query results
+- **Human-in-the-Loop Verification**: Color-coded PII report for user review before masking activation
+- **Manual Override**: Edit `schema_info.json` to add/remove PII columns as needed
+- **SQL Injection Prevention**: Query validation blocks dangerous keywords (DROP, DELETE, UPDATE, etc.)
 - **Execution Tracing**: LangSmith integration for debugging and monitoring
 
 ## Tech Stack
@@ -123,6 +127,61 @@ This will start:
 
 ## Database Setup
 
+### Data Pipeline Workflow
+
+```
+┌─────────────────┐
+│   CSV Files     │  Raw data in data/ directory
+│   (data/*.csv)  │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────┐
+│  1. profiler.py     │  Analyze CSV structure and statistics
+└──────────┬──────────┘
+           │
+           │ Generates data_profile.json
+           ▼
+┌──────────────────────────────┐
+│ 2. relationship_discovery.py │  Suggest PK/FK relationships
+└───────────┬──────────────────┘
+            │
+            │ Generates keys.json (inferred)
+            ▼
+┌───────────────────────────┐
+│ 3. integrity_checker.py   │  Validate data integrity (optional)
+└────────────┬──────────────┘
+             │
+             │ Reports FK violations, PK duplicates
+             ▼
+┌─────────────────┐
+│ 4. load_data.py │  Load CSV → PostgreSQL
+└────────┬────────┘
+         │
+         │ Creates tables + applies constraints
+         ▼
+┌──────────────────────┐
+│ 5. transform_data.py │  Fix integrity issues (if needed)
+└──────────┬───────────┘
+           │
+           │ Interactive SQL console
+           │ Updates keys.json from DB
+           │ Verifies FK relationships
+           ▼
+┌─────────────────────────┐
+│ 6. generate_schema.py   │  Generate schema metadata + PII detection
+└──────────┬──────────────┘
+           │
+           │ Generates:
+           │  - schema_info.json (for LLM)
+           │  - schema_info.md (docs)
+           │  - PII column mapping
+           ▼
+┌──────────────────┐
+│  SQL Agent Ready │  System ready to accept queries
+└──────────────────┘
+```
+
 ### Step 1: Profile the Data
 
 ```bash
@@ -131,15 +190,26 @@ python -m src.data_pipeline.profiler
 
 This generates `src/config/data_profile.json` with statistics about each CSV file.
 
-### Step 2: (Optional) Discover Relationships
+### Step 2: Discover Relationships
 
 ```bash
 python -m src.data_pipeline.relationship_discovery
 ```
 
-This suggests potential foreign key relationships based on column names and data patterns.
+This suggests potential foreign key relationships based on column names and data patterns, generating `src/config/keys.json`.
 
-### Step 3: Load Data into Database
+### Step 3: (Optional) Check Data Integrity
+
+```bash
+python -m src.data_pipeline.integrity_checker
+```
+
+Validates data **before** loading to database:
+- Primary key violations (duplicates, NULLs)
+- Foreign key violations (orphaned records)
+- Systematic offset detection (e.g., ID mismatches across tables)
+
+### Step 4: Load Data into Database
 
 ```bash
 python -m src.data_pipeline.load_data
@@ -149,27 +219,47 @@ This script:
 - Creates tables from CSV files
 - Applies primary and foreign key constraints from `src/config/keys.json`
 - Loads data into PostgreSQL
-- Validates data integrity
 
-### Step 4: Generate Schema Information
+### Step 5: Transform Data (If Needed)
+
+```bash
+python -m src.data_pipeline.transform_data
+```
+
+**Interactive SQL console** for fixing integrity issues:
+
+```sql
+SQL> UPDATE "orders" SET "customerId" = "customerId" - 1000000;
+Query executed: 1500 rows affected
+SQL> UPDATE "reviews" SET "franchiseId" = "franchiseId" - 1000000;
+Query executed: 800 rows affected
+SQL> done
+```
+
+After typing `done`, the script automatically:
+1. Updates `keys.json` from actual database constraints
+2. Verifies all FK relationships
+3. Reports any remaining integrity issues
+
+### Step 6: Generate Schema + Detect PII
 
 ```bash
 python -m src.data_pipeline.generate_schema
 ```
 
-This creates:
-- `src/config/schema_info.json`: Structured schema metadata used by the LLM
-- `src/config/schema_info.md`: Human-readable schema documentation
+This script:
+1. Generates schema metadata from database
+2. **Uses LLM to detect PII columns** (e.g., customer names, reviewer names)
+3. Displays color-coded report for user verification:
+   - 🔴 `[PII]` - Personal information (will be masked)
+   - 🟢 `[SAFE]` - Non-sensitive data
+4. Saves configuration to `src/config/schema_info.json`
 
-### Step 5: (Optional) Verify Data Integrity
+**Creates:**
+- `src/config/schema_info.json`: Complete schema + PII column mapping (used by SQL Agent)
+- `src/config/schema_info.md`: Human-readable documentation
 
-```bash
-python -m src.data_pipeline.integrity_checker
-```
-
-Checks for:
-- Primary key violations (duplicates, NULLs)
-- Foreign key violations (orphaned records)
+**PII Masking**: Personal names are automatically replaced with `Person #1`, `Person #2`, etc. at runtime to protect privacy.
 
 ## Running the Application
 
@@ -212,12 +302,13 @@ cadet/
 │   │
 │   ├── data_pipeline/            # ETL and data preparation
 │   │   ├── __init__.py           # Public API exports
-│   │   ├── load_data.py          # CSV to DB ETL pipeline
-│   │   ├── generate_schema.py    # Schema metadata generator
-│   │   ├── transform_data.py     # PK/FK synchronization
-│   │   ├── integrity_checker.py  # Data validation utilities
+│   │   ├── profiler.py           # CSV data profiler
 │   │   ├── relationship_discovery.py  # Automatic FK detection
-│   │   └── profiler.py           # CSV data profiler
+│   │   ├── integrity_checker.py  # Data validation utilities
+│   │   ├── load_data.py          # CSV to DB ETL pipeline
+│   │   ├── transform_data.py     # Interactive data transformation
+│   │   ├── pii_discovery.py      # LLM-based PII column detection
+│   │   └── generate_schema.py    # Schema + PII metadata generator
 │   │
 │   ├── core/                     # Shared utilities
 │   │   ├── __init__.py           # Public API exports
@@ -458,9 +549,11 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
    - Pandas loading time (~2-3 seconds) on first use
    - Increased browser memory consumption
 
-3. **Simple PII Masking**: Uses regex pattern matching for name detection
-   - May not catch all PII or may over-mask legitimate data
-   - Currently disabled for testing purposes
+3. **LLM-Based PII Detection**: Uses LLM to identify personal information columns
+   - Accuracy depends on sample data quality and LLM reasoning
+   - May miss PII columns with ambiguous names or unclear data patterns
+   - Requires manual verification via color-coded report
+   - Can be manually adjusted by editing `schema_info.json`
 
 4. **Single LLM Dependency**: If Groq API is down, entire system fails
    - No fallback mechanism
@@ -485,9 +578,10 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
    - Advanced mathematical operations
    - Chart generation from Python code
 
-4. **NER-based PII Detection**: Replace regex with named entity recognition
-   - More accurate personal information detection
-   - Reduced false positives
+4. **Enhanced PII Detection**: Improve LLM-based detection accuracy
+   - Fine-tune prompts for better edge case handling
+   - Add support for additional PII types (emails, phone numbers, addresses)
+   - Implement confidence scores for detection results
 
 5. **LLM Fallback Chain**: Add OpenAI or Anthropic as backup
    - Graceful degradation if primary LLM fails

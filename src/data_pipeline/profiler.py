@@ -3,7 +3,7 @@ import glob
 import json
 import pandas as pd
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
@@ -27,9 +27,9 @@ def analyse_csv_file(file_path) -> dict:
 
 		table_metadata["columns"][column] = {}
 
-		null_count = df[column].isna().sum()
+		null_count = int(df[column].isna().sum())
 		null_ratio = null_count / row_count if row_count > 0 else 0.0
-		unique_count = df[column].nunique()
+		unique_count = int(df[column].nunique())
 		unique_ratio = unique_count / row_count if row_count > 0 else 0.0
 		sample_values = df[column].fillna("NULL").head(5).tolist()
 		is_unique = unique_count == row_count
@@ -59,7 +59,7 @@ def analyse_all_csv(data_dir):
 
 	output_path = os.path.join(CONFIG_DIR, 'data_profile.json')
 	with open(output_path, 'w', encoding='utf-8') as f:
-		json.dump(data_profile, f, indent=2, ensure_ascii=False)
+		json.dump(data_profile, f, indent=2, ensure_ascii=False, default=str)
 
 	print(f"Profiled {len(data_profile)} tables")
 	print(f"Saved to {output_path}")

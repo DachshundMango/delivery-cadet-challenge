@@ -25,7 +25,7 @@ while True:
 
     for output in app.stream(inputs):
         for key, value in output.items():
-            # Show generated SQL
+            # KEY = "generate_SQL" -> Show generated SQL
             if str(key) == "generate_SQL":
                 sql = value.get('sql_query', '')
                 if sql:
@@ -34,7 +34,7 @@ while True:
                     print(sql)
                     print("-" * 60)
 
-            # Show query results
+            # KEY = "execute_SQL" -> Show query results
             elif str(key) == "execute_SQL":
                 result = value.get('query_result', '')
                 if result and not result.startswith("Error:"):
@@ -49,7 +49,7 @@ while True:
                 elif result and result.startswith("Error:"):
                     print(f"Query error: {result}\n")
 
-            # Show final answer
+            # KEY = "generate_response" or "generate_general_response" -> Show final answer
             elif str(key) in ["generate_response", "generate_general_response"]:
                 ai_message = value['messages'][-1].content
                 print("Answer:")

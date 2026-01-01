@@ -16,6 +16,8 @@ from src.core.logger import setup_logger
 logger = setup_logger('cadet.graph')
 MAX_SQL_RETRIES = 3
 
+
+# Defined state is put into the StateGraph -> workflow is a StateGraph object
 workflow = StateGraph(SQLAgentState)
 
 def check_intent_classification(state: SQLAgentState) -> str:
@@ -48,6 +50,8 @@ def check_query_validation(state: SQLAgentState) -> str:
 def check_pyodide_classification(state: SQLAgentState) -> str:
     return "pyodide" if state['needs_pyodide'] else "skip"
     
+
+# Add NODES to the workflow
 workflow.add_node("read_question", read_question)
 workflow.add_node("intent_classification", intent_classification)
 workflow.add_node("generate_SQL", generate_SQL)
@@ -57,6 +61,8 @@ workflow.add_node("pyodide_request_classification", pyodide_request_classificati
 workflow.add_node("generate_response", generate_response)
 workflow.add_node("generate_general_response", generate_general_response)
 workflow.add_node("generate_pyodide_analysis", generate_pyodide_analysis)
+
+# Add EDGES to the workflow
 workflow.add_edge(START, "read_question")
 workflow.add_edge("read_question", "intent_classification")
 

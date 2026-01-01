@@ -5,7 +5,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from dotenv import load_dotenv
 from src.core.logger import setup_logger
 
+# Automatically find .env file in the project root and load environment variables
 load_dotenv()
+
 logger = setup_logger('cadet.db')
 
 

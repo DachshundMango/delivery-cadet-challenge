@@ -642,3 +642,4 @@ For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/erro
 # 프롬프트 스크립트를 따로 빼넀다. 
 # 현재 로직이 LLM 기반이다 -> 즉 어떤걸 프롬프트로 하고 어떤걸 내부 백엔드로 로직으로 짯는지 그 구분과 이유를 설명해야함
 # 시각화 여부 너무 경직된 키워드 -> 좀더 자연스럽게 해야한다는걸 깨달음
+# FK PK 설정 -> 순수 사람이 vs PII 는 LMM이 자동 설정 후 사람이 최종검토

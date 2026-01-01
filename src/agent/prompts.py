@@ -292,6 +292,80 @@ Return ONLY the modified JSON array - no markdown, no explanations.
 **Masked Data:**"""
 
 
+def get_pii_detection_prompt(column_data: dict) -> str:
+    """
+    Generate prompt to detect which columns contain personal identifiable information (PII).
+
+    Args:
+        column_data: Dictionary of {table_name: {column_name: [sample_values]}}
+
+    Returns:
+        Formatted prompt string
+    """
+    # Format column data into readable text
+    formatted_data = ""
+    for table_name, columns in column_data.items():
+        formatted_data += f"\n[Table: {table_name}]\n"
+        for column_name, sample_values in columns.items():
+            # Truncate samples to prevent prompt overflow
+            samples_str = str(sample_values)[:150]
+            formatted_data += f"  - {column_name}: {samples_str}\n"
+
+    return f"""You are a data privacy expert. Analyze the following database columns and identify which ones contain INDIVIDUAL PERSON NAMES (PII).
+
+**Database Column Information:**
+{formatted_data}
+
+**Your Task:**
+Identify columns that contain INDIVIDUAL HUMAN NAMES ONLY.
+
+**MUST Include (PII - Personal Names):**
+- Customer first names, last names, full names
+- Reviewer names, user names (when they are individual people)
+- Any column with individual person identifiers like "John", "Sarah", "Michael Smith"
+
+**MUST Exclude (NOT PII):**
+- Franchise names ("Pizza Palace", "Coffee Corner")
+- Company names, supplier names ("ABC Corporation", "Fresh Foods Inc.")
+- City names, location names ("New York", "Boston", "Main Street")
+- Product names ("Chocolate Cake", "Vanilla Ice Cream")
+- Store names ("Downtown Bakery", "Sunset Cafe")
+- IDs, numbers, dates, amounts
+
+**Key Distinction:**
+- Person names: Sound like individual humans (John, Alice, Smith, Emily Davis)
+- Business names: Sound like organizations/places/brands (Palace, Corner, Inc., Bakery, Foods)
+
+**Examples:**
+
+Example 1 - Include these:
+Table: customers
+- firstName: ["John", "Alice", "Bob"] ✓ PII (person names)
+- lastName: ["Smith", "Brown", "Johnson"] ✓ PII (person names)
+
+Example 2 - Exclude these:
+Table: franchises
+- franchiseName: ["Pizza Palace", "Coffee Corner"] ✗ NOT PII (business names)
+- city: ["New York", "Boston"] ✗ NOT PII (location names)
+
+Example 3 - Mixed:
+Table: reviews
+- reviewerName: ["Sarah Johnson", "Mike Davis"] ✓ PII (person names)
+- restaurantName: ["Sunset Grill", "Ocean View"] ✗ NOT PII (business names)
+
+**CRITICAL:** Only return columns that contain INDIVIDUAL PERSON NAMES. Be conservative - when in doubt, exclude it.
+
+**Return Format (JSON only, no markdown):**
+{{
+  "table_name1": ["pii_column1", "pii_column2"],
+  "table_name2": ["pii_column3"]
+}}
+
+If a table has no PII columns, omit it from the result or use empty array.
+
+**Your Analysis:**"""
+
+
 # ===============================================================
 # Response Generation
 # ===============================================================

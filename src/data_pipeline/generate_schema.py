@@ -3,8 +3,17 @@ import json
 from dotenv import load_dotenv
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from src.core.db import get_db_engine
 from src.core.logger import setup_logger
+from src.data_pipeline.pii_discovery import (
+    load_data_profile,
+    collect_column_samples,
+    detect_pii_with_llm,
+    display_report_and_confirm
+)
 
 load_dotenv()
 logger = setup_logger('cadet.generate_schema')
@@ -13,6 +22,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 KEYS_PATH = os.path.join(CONFIG_DIR, 'keys.json')
+DATA_PROFILE_PATH = os.path.join(CONFIG_DIR, 'data_profile.json')
 SCHEMA_JSON_PATH = os.path.join(CONFIG_DIR, 'schema_info.json')
 SCHEMA_MD_PATH = os.path.join(CONFIG_DIR, 'schema_info.md')
 
@@ -126,41 +136,64 @@ def generate_schema_text_for_llm(schema: dict) -> str:
 
 
 def main() -> None:
-    """Generate schema files from keys.json and database"""
+    """Generate schema files from keys.json and database, including PII detection"""
     print("="*60)
-    print("SCHEMA GENERATION")
+    print("SCHEMA GENERATION WITH PII DETECTION")
     print("="*60)
 
     try:
         # Load keys.json
-        print("\n[1/4] Loading keys.json...")
+        print("\n[1/5] Loading keys.json...")
         keys_config = load_keys_config()
         print(f"Loaded {len(keys_config)} tables")
 
         # Connect to DB
-        print("\n[2/4] Connecting to database...")
+        print("\n[2/5] Connecting to database...")
         engine = get_db_engine()
         print("Connected")
 
         # Generate schema
-        print("\n[3/4] Generating schema...")
+        print("\n[3/5] Generating schema...")
         schema = generate_schema_json(keys_config, engine)
-
-        # Add LLM-friendly text to schema JSON
-        schema_with_text = {
-            'tables': schema,
-            'llm_prompt': generate_schema_text_for_llm(schema)
-        }
 
         # Generate markdown
         markdown = generate_schema_markdown(schema)
         print("Schema generated")
 
+        # Detect PII columns
+        print("\n[4/5] Detecting PII columns...")
+        pii_columns = {}
+
+        if os.path.exists(DATA_PROFILE_PATH):
+            try:
+                data_profile = load_data_profile(DATA_PROFILE_PATH)
+                column_data = collect_column_samples(data_profile)
+                pii_columns = detect_pii_with_llm(column_data)
+
+                # Display interactive report
+                display_report_and_confirm(pii_columns, column_data)
+                print("PII detection completed")
+            except Exception as e:
+                logger.warning(f"PII detection failed: {e}")
+                print(f"Warning: PII detection skipped due to error: {e}")
+                pii_columns = {}
+        else:
+            logger.warning(f"Data profile not found at {DATA_PROFILE_PATH}")
+            print("Warning: Skipping PII detection (data_profile.json not found)")
+            pii_columns = {}
+
+        # Add LLM-friendly text and PII columns to schema JSON
+        schema_with_metadata = {
+            'tables': schema,
+            'llm_prompt': generate_schema_text_for_llm(schema),
+            'pii_columns': pii_columns
+        }
+
         # Write files
-        print("\n[4/4] Writing schema files...")
+        print("\n[5/5] Writing schema files...")
 
         with open(SCHEMA_JSON_PATH, 'w', encoding='utf-8') as f:
-            json.dump(schema_with_text, f, indent=2)
+            json.dump(schema_with_metadata, f, indent=2)
         print(f"Wrote {SCHEMA_JSON_PATH}")
 
         with open(SCHEMA_MD_PATH, 'w', encoding='utf-8') as f:
@@ -173,6 +206,9 @@ def main() -> None:
         print(f"\nGenerated files:")
         print(f"  - {SCHEMA_JSON_PATH} (for SQL Agent)")
         print(f"  - {SCHEMA_MD_PATH} (for human review)")
+        if pii_columns:
+            print(f"\nPII columns detected in {len(pii_columns)} table(s)")
+            print("These columns will be automatically masked at runtime")
 
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")

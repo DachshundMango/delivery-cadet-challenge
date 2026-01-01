@@ -4,6 +4,8 @@ import json
 import pandas as pd
 from sqlalchemy import Engine, text
 from dotenv import load_dotenv
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.core.db import get_db_engine
 
 load_dotenv()

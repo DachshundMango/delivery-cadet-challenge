@@ -3,11 +3,13 @@ import json
 from collections import defaultdict
 from sqlalchemy import text
 from dotenv import load_dotenv
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.core.db import get_db_engine
 
 load_dotenv()
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 KEYS_PATH = os.path.join(CONFIG_DIR, 'keys.json')

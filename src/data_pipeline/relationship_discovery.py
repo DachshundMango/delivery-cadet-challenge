@@ -2,7 +2,7 @@ import os
 import json
 import pandas as pd
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 

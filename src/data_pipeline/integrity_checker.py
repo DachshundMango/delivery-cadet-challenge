@@ -2,6 +2,10 @@ import os
 import glob
 import json
 import pandas as pd
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from src.core.console import Console
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -141,56 +145,83 @@ def print_report(pk_issues, fk_issues):
     total_issues = len(pk_issues) + len(fk_issues)
 
     if total_issues == 0:
-        print("NO ISSUES FOUND")
+        Console.success("No integrity issues found", indent=0)
         return
 
-    print("INTEGRITY ISSUES FOUND:")
+    Console.warning(f"Found {total_issues} integrity issue(s)")
 
     issue_num = 1
 
     # Print PK issues
     if pk_issues:
-        print("\n--- PRIMARY KEY ISSUES ---")
+        print(f"\n{Console.THIN_LINE}")
+        print("PRIMARY KEY ISSUES")
+        print(f"{Console.THIN_LINE}")
         for issue in pk_issues:
             print(f"\nIssue #{issue_num}:")
-            print(f"  Table: {issue['table']}")
-            print(f"  PK Column: {issue['pk_column']}")
-            print(f"  Duplicates: {issue['duplicate_count']}")
-            print(f"  NULLs: {issue['null_count']}")
-            print(f"  Hint: {issue['hint']}")
+            Console.info(f"Table: {issue['table']}", indent=0)
+            Console.info(f"PK Column: {issue['pk_column']}", indent=0)
+            Console.info(f"Duplicates: {issue['duplicate_count']}", indent=0)
+            Console.info(f"NULLs: {issue['null_count']}", indent=0)
+            Console.info(f"Hint: {issue['hint']}", indent=0)
             if issue['duplicate_samples']:
-                print(f"  Duplicate Samples: {issue['duplicate_samples']}")
+                Console.info(f"Samples: {issue['duplicate_samples']}", indent=0)
             issue_num += 1
 
     # Print FK issues
     if fk_issues:
-        print("\n--- FOREIGN KEY ISSUES ---")
+        print(f"\n{Console.THIN_LINE}")
+        print("FOREIGN KEY ISSUES")
+        print(f"{Console.THIN_LINE}")
         for issue in fk_issues:
             print(f"\nIssue #{issue_num}:")
-            print(f"  Table: {issue['fk_table']}.{issue['fk_column']}")
-            print(f"  Reference: {issue['ref_table']}.{issue['ref_column']}")
-            print(f"  Missing: {issue['missing_count']} values ({issue['missing_ratio']:.1%})")
-            print(f"  Hint: {issue['hint']}")
-            print(f"  Samples: {issue['missing_samples']}")
+            Console.info(f"Table: {issue['fk_table']}.{issue['fk_column']}", indent=0)
+            Console.info(f"Reference: {issue['ref_table']}.{issue['ref_column']}", indent=0)
+            Console.info(f"Missing: {issue['missing_count']} values ({issue['missing_ratio']:.1%})", indent=0)
+            Console.info(f"Hint: {issue['hint']}", indent=0)
+            Console.info(f"Samples: {issue['missing_samples']}", indent=0)
             issue_num += 1
 
 def main():
 
+    Console.header("Integrity Checker - Data Validation")
+
     if not os.path.exists(KEYS):
-        print(f"Error: {KEYS} not found")
-        print("Run relationship_discovery.py first")
+        Console.error(f"{KEYS} not found", "Run relationship_discovery.py first")
         return
 
+    Console.step(1, 3, "Loading configuration and data")
     keys_config = load_keys_config(KEYS)
     tables = load_csv_data(DATA_DIR)
 
     if not tables:
-        print(f"Error: No CSV files in {DATA_DIR}")
+        Console.error(f"No CSV files found in {DATA_DIR}")
         return
 
+    Console.info(f"Loaded {len(tables)} tables")
+
+    Console.step(2, 3, "Checking primary key constraints")
     pk_issues = detect_pk_issues(tables, keys_config)
+    if pk_issues:
+        Console.warning(f"Found {len(pk_issues)} PK issue(s)")
+    else:
+        Console.success("No PK issues")
+
+    Console.step(3, 3, "Checking foreign key constraints")
     fk_issues = detect_fk_issues(tables, keys_config)
+    if fk_issues:
+        Console.warning(f"Found {len(fk_issues)} FK issue(s)")
+    else:
+        Console.success("No FK issues")
+
+    print()
     print_report(pk_issues, fk_issues)
+
+    total_issues = len(pk_issues) + len(fk_issues)
+    if total_issues > 0:
+        Console.footer(f"Validation completed - {total_issues} issue(s) found", success=False)
+    else:
+        Console.footer("Validation completed - no issues found")
 
 if __name__ == '__main__':
     main()

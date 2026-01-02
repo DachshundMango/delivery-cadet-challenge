@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from src.core.db import get_db_engine
 from src.core.logger import setup_logger
+from src.core.console import Console
 from src.data_pipeline.pii_discovery import (
     load_data_profile,
     collect_column_samples,
@@ -137,31 +138,29 @@ def generate_schema_text_for_llm(schema: dict) -> str:
 
 def main() -> None:
     """Generate schema files from keys.json and database, including PII detection"""
-    print("="*60)
-    print("SCHEMA GENERATION WITH PII DETECTION")
-    print("="*60)
+    Console.header("Schema Generation with PII Detection")
 
     try:
         # Load keys.json
-        print("\n[1/5] Loading keys.json...")
+        Console.step(1, 5, "Loading keys.json")
         keys_config = load_keys_config()
-        print(f"Loaded {len(keys_config)} tables")
+        Console.info(f"Loaded {len(keys_config)} tables")
 
         # Connect to DB
-        print("\n[2/5] Connecting to database...")
+        Console.step(2, 5, "Connecting to database")
         engine = get_db_engine()
-        print("Connected")
+        Console.info("Connected")
 
         # Generate schema
-        print("\n[3/5] Generating schema...")
+        Console.step(3, 5, "Generating schema")
         schema = generate_schema_json(keys_config, engine)
 
         # Generate markdown
         markdown = generate_schema_markdown(schema)
-        print("Schema generated")
+        Console.info("Schema generated")
 
         # Detect PII columns
-        print("\n[4/5] Detecting PII columns...")
+        Console.step(4, 5, "Detecting PII columns")
         pii_columns = {}
 
         if os.path.exists(DATA_PROFILE_PATH):
@@ -172,14 +171,14 @@ def main() -> None:
 
                 # Display interactive report
                 display_report_and_confirm(pii_columns, column_data)
-                print("PII detection completed")
+                Console.info("PII detection completed")
             except Exception as e:
                 logger.warning(f"PII detection failed: {e}")
-                print(f"Warning: PII detection skipped due to error: {e}")
+                Console.warning(f"PII detection skipped due to error", str(e)[:100])
                 pii_columns = {}
         else:
             logger.warning(f"Data profile not found at {DATA_PROFILE_PATH}")
-            print("Warning: Skipping PII detection (data_profile.json not found)")
+            Console.warning("Skipping PII detection (data_profile.json not found)")
             pii_columns = {}
 
         # Add LLM-friendly text and PII columns to schema JSON
@@ -190,38 +189,36 @@ def main() -> None:
         }
 
         # Write files
-        print("\n[5/5] Writing schema files...")
+        Console.step(5, 5, "Writing schema files")
 
         with open(SCHEMA_JSON_PATH, 'w', encoding='utf-8') as f:
             json.dump(schema_with_metadata, f, indent=2)
-        print(f"Wrote {SCHEMA_JSON_PATH}")
+        Console.success(f"Wrote {SCHEMA_JSON_PATH}", indent=0)
 
         with open(SCHEMA_MD_PATH, 'w', encoding='utf-8') as f:
             f.write(markdown)
-        print(f"Wrote {SCHEMA_MD_PATH}")
+        Console.success(f"Wrote {SCHEMA_MD_PATH}", indent=0)
 
-        print("\n" + "="*60)
-        print("SCHEMA GENERATION COMPLETE")
-        print("="*60)
-        print(f"\nGenerated files:")
-        print(f"  - {SCHEMA_JSON_PATH} (for SQL Agent)")
-        print(f"  - {SCHEMA_MD_PATH} (for human review)")
+        Console.footer("Schema generation completed")
+        Console.info("Generated files:", indent=0)
+        Console.info(f"  - {SCHEMA_JSON_PATH} (for SQL Agent)", indent=0)
+        Console.info(f"  - {SCHEMA_MD_PATH} (for human review)", indent=0)
         if pii_columns:
-            print(f"\nPII columns detected in {len(pii_columns)} table(s)")
-            print("These columns will be automatically masked at runtime")
+            Console.info(f"\nPII columns detected in {len(pii_columns)} table(s)", indent=0)
+            Console.info("These columns will be automatically masked at runtime", indent=0)
 
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
-        print(f"\nError: {e}")
-        print("\nPlease run the pipeline in order:")
-        print("  1. python -m src.data_pipeline.profiler")
-        print("  2. python -m src.data_pipeline.relationship_discovery")
-        print("  3. python -m src.data_pipeline.load_data")
-        print("  4. python -m src.data_pipeline.transform_data")
-        print("  5. python -m src.data_pipeline.generate_schema")
+        Console.error(f"{e}")
+        Console.info("\nPlease run the pipeline in order:", indent=0)
+        Console.info("  1. python -m src.data_pipeline.profiler", indent=0)
+        Console.info("  2. python -m src.data_pipeline.relationship_discovery", indent=0)
+        Console.info("  3. python -m src.data_pipeline.load_data", indent=0)
+        Console.info("  4. python -m src.data_pipeline.transform_data", indent=0)
+        Console.info("  5. python -m src.data_pipeline.generate_schema", indent=0)
     except (SQLAlchemyError, json.JSONDecodeError, OSError) as e:
         logger.error(f"Schema generation failed: {e}")
-        print(f"\nError: {e}")
+        Console.error(f"{e}")
 
 
 if __name__ == '__main__':

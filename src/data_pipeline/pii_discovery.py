@@ -3,22 +3,16 @@ import glob
 import json
 import pandas as pd
 from dotenv import load_dotenv
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.core.logger import setup_logger
+from src.core.console import Console
 from langchain_groq import ChatGroq
 
 from src.agent.prompts import get_pii_detection_prompt
 
-# ANSI Color Codes
-RED = "\033[91m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-BLUE = "\033[94m"
-MAGENTA = "\033[95m"
-CYAN = "\033[96m"
-RESET = "\033[0m"
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
@@ -92,43 +86,41 @@ def display_report_and_confirm(detection_result: dict, all_columns: dict) -> Non
 		detection_result: Dictionary of {table_name: [pii_column_list]}
 		all_columns: Dictionary of {table_name: {column_name: [samples]}}
 	"""
-	print("\n" + "=" * 80)
-	print(f"{CYAN}PII DETECTION REPORT{RESET}")
-	print("=" * 80)
-	print()
+	print(f"\n{Console.THICK_LINE}")
+	print("PII DETECTION REPORT")
+	print(f"{Console.THICK_LINE}\n")
 
 	# Display each table
 	for table_name, columns in all_columns.items():
-		print(f"{BLUE}[Table: {table_name}]{RESET}")
+		Console.info(f"[Table: {table_name}]", indent=0)
 
 		pii_columns = detection_result.get(table_name, [])
 
 		for column_name in columns.keys():
 			if column_name in pii_columns:
 				# PII column - show in RED
-				print(f"  {RED}🔴 [PII]  {column_name}{RESET}")
+				print(f"  {Console.RED}[PII]  {column_name}{Console.RESET}")
 			else:
 				# Safe column - show in GREEN
-				print(f"  {GREEN}🟢 [SAFE] {column_name}{RESET}")
+				print(f"  {Console.GREEN}[SAFE] {column_name}{Console.RESET}")
 
 		print()  # Blank line between tables
 
-	print("=" * 80)
-	print(f"{YELLOW}REVIEW THE ABOVE DETECTION RESULTS{RESET}")
+	print(f"{Console.THICK_LINE}")
+	Console.warning("Review the above detection results")
 	print()
-	print("The detected PII columns will be saved to:")
-	print(f"  {CYAN}src/config/schema_info.json{RESET}")
+	Console.info("The detected PII columns will be saved to:", indent=0)
+	Console.info("  src/config/schema_info.json", indent=0)
 	print()
-	print("If you need to modify the detection results:")
-	print(f"  1. Edit {CYAN}src/config/schema_info.json{RESET} after this script completes")
-	print(f"  2. Look for the {CYAN}'pii_columns'{RESET} field")
-	print(f"  3. Add/remove columns as needed")
+	Console.info("If you need to modify the detection results:", indent=0)
+	Console.info("  1. Edit src/config/schema_info.json after this script completes", indent=0)
+	Console.info("  2. Look for the 'pii_columns' field", indent=0)
+	Console.info("  3. Add/remove columns as needed", indent=0)
 	print()
-	print("=" * 80)
-	print()
+	print(f"{Console.THICK_LINE}\n")
 
 	# Wait for user confirmation (Option B: Verify-First)
-	input(f"{YELLOW}Press ENTER to save and continue...{RESET} ")
+	input("Press ENTER to save and continue... ")
 
 def main():
 	"""
@@ -141,33 +133,35 @@ def main():
 	4. Wait for user confirmation
 	5. Save to schema_info.json
 	"""
-	logger.info("=" * 80)
-	logger.info("PII Discovery Script Started")
-	logger.info("=" * 80)
+	Console.header("PII Discovery - Personal Information Detection")
 
 	# Step 1: Load data profile
+	Console.step(1, 5, "Loading data profile")
 	data_profile_path = os.path.join(CONFIG_DIR, 'data_profile.json')
 
 	if not os.path.exists(data_profile_path):
 		logger.error(f"Data profile not found: {data_profile_path}")
-		logger.error("Please run 'python -m src.data_pipeline.profiler' first.")
+		Console.error(f"Data profile not found: {data_profile_path}", "Run profiler.py first")
 		return
 
-	logger.info(f"Loading data profile from: {data_profile_path}")
 	data_profile = load_data_profile(data_profile_path)
+	Console.info(f"Loaded from {data_profile_path}")
 
 	# Step 2: Collect column samples
-	logger.info("Collecting column samples...")
+	Console.step(2, 5, "Collecting column samples")
 	column_data = collect_column_samples(data_profile)
-	logger.info(f"Collected samples from {len(column_data)} tables")
+	Console.info(f"Collected samples from {len(column_data)} tables")
 
 	# Step 3: Detect PII using LLM (one-time call)
+	Console.step(3, 5, "Detecting PII columns with LLM")
 	detection_result = detect_pii_with_llm(column_data)
 
 	# Step 4: Display report and wait for user confirmation
+	Console.step(4, 5, "Reviewing detection results")
 	display_report_and_confirm(detection_result, column_data)
 
 	# Step 5: Save to schema_info.json
+	Console.step(5, 5, "Saving results")
 	schema_info_path = os.path.join(CONFIG_DIR, 'schema_info.json')
 
 	# Load existing schema_info or create new one
@@ -183,18 +177,11 @@ def main():
 	schema_info['pii_columns'] = detection_result
 
 	# Save updated schema_info
-	logger.info(f"Saving PII detection results to: {schema_info_path}")
 	with open(schema_info_path, 'w', encoding='utf-8') as f:
 		json.dump(schema_info, f, indent=2, ensure_ascii=False)
 
-	logger.info("=" * 80)
-	logger.info(f"{GREEN}✓ PII Discovery Completed Successfully{RESET}")
-	logger.info(f"PII columns saved to: {schema_info_path}")
-	logger.info("=" * 80)
-	print()
-	print(f"{GREEN}✓ PII detection completed!{RESET}")
-	print(f"Results saved to: {CYAN}{schema_info_path}{RESET}")
-	print()
+	Console.footer("PII discovery completed")
+	Console.info(f"Results saved to: {schema_info_path}", indent=0)
 
 
 if __name__ == "__main__":

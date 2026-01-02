@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.core.db import get_db_engine
+from src.core.console import Console
 
 load_dotenv()
 
@@ -36,7 +37,7 @@ def execute_query(engine, query):
 
 def update_keys_from_db(engine):
     """Read actual PK/FK constraints from DB and update keys.json"""
-    print("\n[Updating keys.json from DB]")
+    Console.info("\n[Updating keys.json from DB]", indent=0)
 
     # Get all tables first
     tables_query = """
@@ -113,17 +114,17 @@ def update_keys_from_db(engine):
         with open(KEYS_PATH, 'w', encoding='utf-8') as f:
             json.dump(new_keys, f, indent=2)
 
-        print(f"keys.json updated with {len(new_keys)} tables")
+        Console.success(f"keys.json updated with {len(new_keys)} tables", indent=0)
         return True
 
     except Exception as e:
-        print(f"Failed to update keys.json: {str(e)[:100]}")
+        Console.error(f"Failed to update keys.json", str(e)[:100])
         return False
 
 
 def verify_transformation(engine, keys_config):
     """Verify transformation by checking FK relationships in DB"""
-    print("\n[Verifying Transformation]")
+    Console.info("\n[Verifying Transformation]", indent=0)
 
     issue_count = 0
 
@@ -149,17 +150,17 @@ def verify_transformation(engine, keys_config):
                     orphan_count = result[0]
 
                 if orphan_count > 0:
-                    print(f"WARNING: {table_name}.{col}: {orphan_count} orphans remain")
+                    Console.warning(f"{table_name}.{col}: {orphan_count} orphans remain")
                     issue_count += 1
             except Exception as e:
-                print(f"WARNING: Could not verify {table_name}.{col}: {str(e)[:60]}")
+                Console.warning(f"Could not verify {table_name}.{col}", str(e)[:60])
                 issue_count += 1
 
     if issue_count == 0:
-        print("All integrity issues resolved!")
+        Console.success("All integrity issues resolved!", indent=0)
         return True
     else:
-        print(f"\nWARNING: {issue_count} issues still remain")
+        Console.warning(f"{issue_count} issues still remain")
         return False
 
 
@@ -167,12 +168,11 @@ def main():
     """
     Interactive data transformation tool
     """
-    print("="*60)
-    print("DATA TRANSFORMATION TOOL")
-    print("="*60)
-    print("\nEnter SQL queries to transform your data.")
-    print("Type 'done' when finished to verify and update keys.json.")
-    print("Type 'quit' to exit without verification.\n")
+    Console.header("Data Transformation Tool")
+
+    Console.info("Enter SQL queries to transform your data.", indent=0)
+    Console.info("Type 'done' when finished to verify and update keys.json.", indent=0)
+    Console.info("Type 'quit' to exit without verification.\n", indent=0)
 
     engine = get_db_engine()
     query_count = 0
@@ -185,7 +185,7 @@ def main():
                 continue
 
             if query.lower() == 'quit':
-                print("Exiting without verification.")
+                Console.info("Exiting without verification.", indent=0)
                 return
 
             if query.lower() == 'done':
@@ -194,18 +194,19 @@ def main():
             success, result = execute_query(engine, query)
 
             if success:
-                print(f"Query executed: {result} rows affected")
+                Console.success(f"Query executed: {result} rows affected", indent=0)
                 query_count += 1
             else:
-                print(f"Query failed: {result}")
+                Console.error(f"Query failed", result)
 
         except KeyboardInterrupt:
-            print("\n\nExiting...")
+            print("\n")
+            Console.info("Exiting...", indent=0)
             return
         except EOFError:
             break
 
-    print(f"\n{query_count} queries executed successfully.")
+    Console.info(f"\n{query_count} queries executed successfully.", indent=0)
 
     # Update keys.json from DB
     update_keys_from_db(engine)
@@ -216,20 +217,14 @@ def main():
         success = verify_transformation(engine, keys_config)
 
         if success:
-            print("\n" + "="*60)
-            print("TRANSFORMATION COMPLETE - ALL VERIFIED")
-            print("="*60)
-            print("\nYou can now run the SQL Agent:")
-            print("  python src/main.py")
+            Console.footer("Transformation completed - all verified")
+            Console.info("You can now run the SQL Agent:", indent=0)
+            Console.info("  python src/main.py", indent=0)
         else:
-            print("\n" + "="*60)
-            print("TRANSFORMATION COMPLETE - VERIFICATION FAILED")
-            print("="*60)
-            print("Some issues remain. Manual review required.")
+            Console.footer("Transformation completed - verification failed", success=False)
+            Console.info("Some issues remain. Manual review required.", indent=0)
     else:
-        print("\n" + "="*60)
-        print("TRANSFORMATION COMPLETE")
-        print("="*60)
+        Console.footer("Transformation completed")
 
 
 if __name__ == '__main__':

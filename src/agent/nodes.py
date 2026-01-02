@@ -295,6 +295,7 @@ def generate_SQL(state: SQLAgentState) -> dict:
 
     Loads database schema and prompts LLM to create a valid SQL query.
     Validates the generated query for safety before returning.
+    On retry, provides specific hints based on previous error.
 
     Args:
         state: Current workflow state (requires user_question)
@@ -323,8 +324,46 @@ def generate_SQL(state: SQLAgentState) -> dict:
             schema_data = json.load(f)
         allowed_tables = set(schema_data['tables'].keys())
 
-        # Get prompt from prompts module
+        # Get base prompt from prompts module
         sql_prompt = get_sql_generation_prompt(schema_info, user_question)
+
+        # Check if this is a retry (look for previous errors)
+        messages = state.get('messages', [])
+        retry_count = sum(1 for msg in messages if 'Error:' in str(getattr(msg, 'content', '')))
+
+        if retry_count > 0:
+            # Get previous error from query_result
+            previous_error = state.get('query_result', '')
+
+            # Add specific hints based on error type
+            if 'Unknown tables in query' in previous_error:
+                # Extract invalid table names from error
+                import re
+                match = re.search(r"Unknown tables in query: (\{.*?\})", previous_error)
+                if match:
+                    invalid_tables = match.group(1)
+                    # Check if it's a subquery alias issue (single letter or short name)
+                    invalid_list = eval(invalid_tables)  # Convert string set to actual set
+                    is_likely_alias = any(len(t) <= 2 for t in invalid_list)
+
+                    if is_likely_alias:
+                        sql_prompt += f"\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt used a subquery with alias {invalid_tables}, which caused a validation error.\nALWAYS use CTE (WITH clause) instead of subqueries in FROM clause.\nExample: WITH ranked AS (SELECT ... RANK() OVER (PARTITION BY ... ORDER BY ...) AS rank FROM ...) SELECT * FROM ranked WHERE rank = 1"
+                    else:
+                        sql_prompt += f"\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt used invalid table(s): {invalid_tables}\nThese tables DO NOT EXIST in the schema.\nUse ONLY these exact table names: {', '.join(sorted(allowed_tables))}\nDo NOT abbreviate or invent table names."
+
+            elif 'Multiple SQL statements not allowed' in previous_error:
+                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt had multiple SQL statements (separated by semicolons).\nGenerate EXACTLY ONE query. Use CTE (WITH clause) for multi-step logic:\nWITH temp AS (SELECT ...) SELECT ... FROM temp"
+
+            elif 'SQL comments not allowed' in previous_error:
+                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt had SQL comments (-- or /* */).\nRemove ALL comments. Return ONLY the SQL query with no explanations."
+
+            elif 'Forbidden SQL keyword: CREATE' in previous_error:
+                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt used CREATE TEMP TABLE.\nUse CTE (WITH clause) instead: WITH temp AS (SELECT ...) SELECT ... FROM temp"
+
+            elif 'column' in previous_error.lower() and 'does not exist' in previous_error.lower():
+                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt referenced a non-existent column.\nRemember: PostgreSQL converts unquoted column names to lowercase.\nALWAYS use double quotes: t.\"columnName\" not t.columnName"
+
+            logger.info(f"Retry {retry_count}: Added specific hint for error type")
 
         response = llm.invoke(sql_prompt)
         sql_query = response.content.strip()

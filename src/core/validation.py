@@ -60,6 +60,35 @@ def validate_user_input(user_input: str, field_name: str = "input") -> str:
     return sanitized
 
 
+def _extract_cte_names(sql_query: str) -> Set[str]:
+    """
+    Extract CTE (Common Table Expression) names from SQL query.
+
+    CTEs are defined with: WITH cte_name AS (...)
+
+    Args:
+        sql_query: SQL query string
+
+    Returns:
+        Set of CTE names (lowercase)
+    """
+    import re
+    cte_names = set()
+
+    # Pattern: WITH name AS or WITH name1 AS (...), name2 AS (...)
+    # Match: WITH followed by identifier before AS
+    pattern = r'\bWITH\s+(\w+)\s+AS\b'
+    matches = re.findall(pattern, sql_query, re.IGNORECASE)
+    cte_names.update(m.lower() for m in matches)
+
+    # Also match subsequent CTEs after commas: , name AS
+    pattern = r',\s*(\w+)\s+AS\b'
+    matches = re.findall(pattern, sql_query, re.IGNORECASE)
+    cte_names.update(m.lower() for m in matches)
+
+    return cte_names
+
+
 def _extract_table_names(parsed_query) -> Set[str]:
     """
     Extract table names from parsed SQL query.
@@ -148,18 +177,24 @@ def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
     try:
         parsed = sqlparse.parse(sql_query)[0]
 
+        # Extract CTE names (temporary tables defined with WITH clause)
+        cte_names = _extract_cte_names(sql_query)
+
         # Extract table names from query
         query_tables = _extract_table_names(parsed)
 
+        # Remove CTE names from validation (they are not schema tables)
+        actual_tables = query_tables - cte_names
+
         # Check if all tables are in schema
-        invalid_tables = query_tables - allowed_tables
+        invalid_tables = actual_tables - allowed_tables
         if invalid_tables:
             raise SQLGenerationError(
                 f"Unknown tables in query: {invalid_tables}",
                 details={'query': sql_query, 'allowed': list(allowed_tables)}
             )
 
-        logger.info(f"SQL validation passed: {len(query_tables)} tables")
+        logger.info(f"SQL validation passed: {len(actual_tables)} schema tables, {len(cte_names)} CTEs")
         return True
 
     except Exception as e:

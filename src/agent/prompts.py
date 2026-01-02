@@ -80,8 +80,8 @@ User question: "{user_question}"
 - For any other question, respond: "I can only answer questions based on the database. Please ask a data-related question."
 
 **CRITICAL - Privacy Protection:**
-- Replace ONLY individual customer/person names with "Person #N" (with numbering)
-- Keep franchise names, supplier names, company names unchanged
+- Replace ONLY individual person names with "Person #N" (with numbering)
+- Keep organization names, company names, business names unchanged
 
 Respond briefly and clearly."""
 
@@ -101,52 +101,33 @@ def get_sql_generation_prompt(schema_info: str, user_question: str) -> str:
     Returns:
         Formatted prompt string
     """
-    return f"""Generate PostgreSQL SELECT query.
+    return f"""Generate PostgreSQL SELECT query for the user's question using ONLY the tables in the schema below.
 
 **Database Schema:**
 {schema_info}
 
-**CRITICAL PostgreSQL Quoting Rules:**
-- PostgreSQL converts unquoted identifiers to LOWERCASE
-- ALWAYS use double quotes around ALL column names in EVERY clause
-- This includes: SELECT, WHERE, JOIN, GROUP BY, ORDER BY, HAVING
-- Quote every column reference: alias."columnName" NOT alias.columnName
+**CRITICAL RULES:**
 
-**Examples of CORRECT quoting:**
-✓ SELECT: SELECT s."first_name", s."customerID" FROM "sales_customers" s
-✓ JOIN: JOIN "sales_transactions" t ON s."customerID" = t."customerID"
-✓ GROUP BY: GROUP BY t."product", t."paymentMethod"
-✓ ORDER BY: ORDER BY t."dateTime" DESC
+1. **Use EXACT table names from schema** - Never abbreviate or invent names
+   ✓ CORRECT: FROM "table_name_from_schema"
+   ✗ WRONG: FROM abbreviated_name (no such table)
+   ✗ WRONG: FROM invented_table (no such table)
 
-**Common Mistakes to AVOID:**
-❌ WRONG: SELECT t.paymentMethod, COUNT(*) FROM ... GROUP BY t.paymentMethod
-   Error: column t.paymentmethod does not exist (lowercase!)
-✓ CORRECT: SELECT t."paymentMethod", COUNT(*) FROM ... GROUP BY t."paymentMethod"
+2. **Keep queries simple** - Use ORDER BY + LIMIT for "top N", not window functions
 
-❌ WRONG: ORDER BY t.dateTime DESC
-   Error: column t.datetime does not exist (lowercase!)
-✓ CORRECT: ORDER BY t."dateTime" DESC
+3. **Quote ALL columns** - PostgreSQL is case-sensitive: t."columnName" not t.columnName
 
-**CRITICAL: Schema-Only Constraint**
-- NEVER reference tables that are NOT explicitly listed in the schema above
-- NEVER assume additional tables exist (e.g., products, items, categories)
-- ALWAYS verify every table you reference appears in the schema
+4. **Single query only** - No semicolons in middle, NO comments (-- or /* */), no temp tables
 
-**Common Mistake to AVOID:**
-WRONG: SELECT p."product", SUM(t."quantity") FROM products p JOIN "sales_transactions" t ...
-  ❌ This assumes a 'products' table exists - it does NOT
-CORRECT: SELECT t."product", SUM(t."quantity") FROM "sales_transactions" t ...
-  ✓ Uses the 'product' column directly from sales_transactions table
-
-**Query Rules:**
-1. Use ONLY tables/columns from schema above - verify EVERY table exists
-2. Use GROUP BY with aggregate functions (SUM, COUNT, AVG)
-3. ORDER BY aliases or column position for aggregates
-4. Return ONLY SQL query - no markdown, no explanations
+5. **Advanced features ONLY when necessary:**
+   - Window Functions: for ranking WITHIN groups (PARTITION BY)
+   - CTEs (WITH clause): ALWAYS use CTE instead of subqueries in FROM clause
+   - Example: WITH ranked AS (SELECT ... RANK() OVER ...) SELECT * FROM ranked WHERE rank = 1
 
 **User Question:** {user_question}
 
-**SQL Query:**"""
+Return ONLY the SQL query below. NO explanations, NO markdown, NO text before or after the query:
+"""
 
 
 # ===============================================================
@@ -189,8 +170,10 @@ def get_visualization_prompt(user_question: str, sql_result: str) -> str:
 - Time series/trends → "line"
 - Parts of whole/proportions → "pie"
 
-Return ONLY JSON:
-{{"visualise": "yes", "chart_type": "bar"}}"""
+Return ONLY the JSON below. NO explanations, NO text before or after. Just the JSON object:
+{{"visualise": "yes", "chart_type": "bar"}}
+OR
+{{"visualise": "no"}}"""
 
 
 # ===============================================================
@@ -224,12 +207,8 @@ Generate Python code to analyze this data. CRITICAL RULES:
 5. Print the result using print() - this is what the user will see
 6. DO NOT use matplotlib or plotting libraries - only pandas operations
 7. Keep output concise and readable
-8. Return ONLY executable Python code, NO markdown, NO explanations
 
-Example for "show statistics":
-import pandas as pd
-df = pd.DataFrame({sql_result})
-print(df.describe())
+Return ONLY executable Python code below. NO markdown code blocks, NO explanations, NO text before or after the code:
 """
 
 
@@ -261,9 +240,9 @@ Look at each value in the data. If it appears to be an INDIVIDUAL PERSON'S NAME 
 - Single person names in name fields
 
 **What NOT to mask (business/organizational names):**
-- Business names: "Pizza Palace", "Coffee Corner", "Fresh Foods Inc."
-- Stores/franchises: "Downtown Bakery", "Sunset Cafe"
-- Brands/products: "Chocolate Delight", "Vanilla Dream"
+- Business names: "Acme Corp", "Global Services Inc."
+- Stores/organizations: "Downtown Shop", "City Center"
+- Brands/products: "Product A", "Brand X"
 - Companies: "ABC Corporation", "XYZ Supplies"
 - Locations: "New York", "London", "Main Street"
 
@@ -280,16 +259,15 @@ Input: [{{"name": "John Smith", "spending": 1000}}, {{"name": "Emily Davis", "sp
 Output: [{{"name": "Person #1", "spending": 1000}}, {{"name": "Person #2", "spending": 500}}]
 
 Example 2 - Keep business names:
-Input: [{{"name": "Pizza Palace", "reviews": 100}}, {{"name": "Coffee Corner", "reviews": 80}}]
-Output: [{{"name": "Pizza Palace", "reviews": 100}}, {{"name": "Coffee Corner", "reviews": 80}}]
+Input: [{{"name": "Acme Corp", "reviews": 100}}, {{"name": "Global Services", "reviews": 80}}]
+Output: [{{"name": "Acme Corp", "reviews": 100}}, {{"name": "Global Services", "reviews": 80}}]
 
 Example 3 - Mixed data:
-Input: [{{"customer": "Alice Brown", "store": "Sunset Bakery", "amount": 50}}]
-Output: [{{"customer": "Person #1", "store": "Sunset Bakery", "amount": 50}}]
+Input: [{{"customer": "Alice Brown", "store": "Downtown Shop", "amount": 50}}]
+Output: [{{"customer": "Person #1", "store": "Downtown Shop", "amount": 50}}]
 
-Return ONLY the modified JSON array - no markdown, no explanations.
-
-**Masked Data:**"""
+Return ONLY the modified JSON array below. NO markdown, NO explanations, NO text before or after:
+"""
 
 
 def get_pii_detection_prompt(column_data: dict) -> str:
@@ -320,16 +298,16 @@ def get_pii_detection_prompt(column_data: dict) -> str:
 Identify columns that contain INDIVIDUAL HUMAN NAMES ONLY.
 
 **MUST Include (PII - Personal Names):**
-- Customer first names, last names, full names
+- Person first names, last names, full names (e.g., customer names, employee names, user names)
 - Reviewer names, user names (when they are individual people)
 - Any column with individual person identifiers like "John", "Sarah", "Michael Smith"
 
 **MUST Exclude (NOT PII):**
-- Franchise names ("Pizza Palace", "Coffee Corner")
-- Company names, supplier names ("ABC Corporation", "Fresh Foods Inc.")
+- Organization names ("Acme Corp", "Global Services")
+- Company names, business names ("ABC Corporation", "XYZ Industries Inc.")
 - City names, location names ("New York", "Boston", "Main Street")
-- Product names ("Chocolate Cake", "Vanilla Ice Cream")
-- Store names ("Downtown Bakery", "Sunset Cafe")
+- Product names ("Product A", "Brand X")
+- Store names ("Downtown Shop", "City Center")
 - IDs, numbers, dates, amounts
 
 **Key Distinction:**
@@ -344,26 +322,24 @@ Table: customers
 - lastName: ["Smith", "Brown", "Johnson"] ✓ PII (person names)
 
 Example 2 - Exclude these:
-Table: franchises
-- franchiseName: ["Pizza Palace", "Coffee Corner"] ✗ NOT PII (business names)
+Table: organizations
+- organizationName: ["Acme Corp", "Global Services"] ✗ NOT PII (business names)
 - city: ["New York", "Boston"] ✗ NOT PII (location names)
 
 Example 3 - Mixed:
 Table: reviews
 - reviewerName: ["Sarah Johnson", "Mike Davis"] ✓ PII (person names)
-- restaurantName: ["Sunset Grill", "Ocean View"] ✗ NOT PII (business names)
+- organizationName: ["Acme Corp", "Global Services"] ✗ NOT PII (business names)
 
 **CRITICAL:** Only return columns that contain INDIVIDUAL PERSON NAMES. Be conservative - when in doubt, exclude it.
 
-**Return Format (JSON only, no markdown):**
+If a table has no PII columns, omit it from the result or use empty array.
+
+Return ONLY the JSON object below. NO markdown, NO explanations, NO text before or after:
 {{
   "table_name1": ["pii_column1", "pii_column2"],
   "table_name2": ["pii_column3"]
-}}
-
-If a table has no PII columns, omit it from the result or use empty array.
-
-**Your Analysis:**"""
+}}"""
 
 
 # ===============================================================
@@ -384,38 +360,53 @@ def get_response_generation_prompt(question: str, result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = result[:1000] if len(result) > 1000 else result
 
-    return f"""Answer the user's question using the query results.
+    return f"""You are answering a data question. Parse the JSON results carefully and write a natural language response.
 
 **Question:** {question}
-**Results:** {truncated_result}
+**Data (JSON):** {truncated_result}
 
-**Guidelines:**
-- Direct, clear answer
-- Natural, readable format
-- NO SQL code or technical details
-- Summarize if many results
-- Use bullet points for readability
+**CRITICAL INSTRUCTIONS:**
+1. Parse the JSON properly - each object has key-value pairs
+2. For each row, extract values separately: row["key1"], row["key2"], etc.
+3. Write complete sentences with proper spacing between words and numbers
+4. NEVER concatenate values without spaces or punctuation
+5. Use bullet points for lists (one item per line)
+
+**Response format:**
+- Start each item with a bullet point or number
+- Use natural language: "Category A" not "categoryA"
+- Add spaces: "revenue of $19,983" not "revenue19983"
+- Add commas in numbers: "19,983" not "19983"
+
+**WRONG examples to AVOID:**
+❌ "19,983thanaveragetransactionsvalue128.55" - NO SPACES
+❌ "XXL19983128.55" - VALUES CONCATENATED
+❌ "categoryArevenue19983" - COLUMN NAMES MIXED
+
+**CORRECT examples:**
+✓ "Category A has a revenue of $19,983 with average value of $128.55"
+✓ "- Category: A\n- Revenue: $19,983\n- Average: $128.55"
 
 **CRITICAL - Privacy Protection (MANDATORY):**
 ⚠️ YOU MUST NEVER SHOW ANY INDIVIDUAL PERSON NAMES IN YOUR RESPONSE ⚠️
 
-- SCAN the entire query result for ANY individual customer/person names
+- SCAN the entire query result for ANY individual person names
 - Replace EVERY SINGLE occurrence with "Person #N" using sequential numbering
-- This applies to: firstName, lastName, fullName, customerName, name fields
-- DO NOT mask: franchise names, supplier names, company names, business names, product names, location names
+- This applies to: firstName, lastName, fullName, name fields (when referring to people)
+- DO NOT mask: organization names, company names, business names, product names, location names
 
 **Examples:**
-❌ WRONG: "The top customer is John Smith with $1000"
-✅ CORRECT: "The top customer is Person #1 with $1000"
+❌ WRONG: "The top person is John Smith with $1000"
+✅ CORRECT: "The top person is Person #1 with $1000"
 
 ❌ WRONG: "1. Alice Johnson - $800, 2. Bob Williams - $500"
 ✅ CORRECT: "1. Person #1 - $800, 2. Person #2 - $500"
 
-❌ WRONG: "Customers include Sarah, Michael, and David"
-✅ CORRECT: "Customers include Person #1, Person #2, and Person #3"
+❌ WRONG: "People include Sarah, Michael, and David"
+✅ CORRECT: "People include Person #1, Person #2, and Person #3"
 
-✅ CORRECT: "Top franchise: Pizza Palace" (business name, keep as-is)
-✅ CORRECT: "Supplier: Fresh Foods Inc." (company name, keep as-is)
+✅ CORRECT: "Top organization: Acme Corp" (business name, keep as-is)
+✅ CORRECT: "Company: Global Services Inc." (company name, keep as-is)
 
 **BEFORE you write your answer, VERIFY that no individual person names appear in your response.**
 

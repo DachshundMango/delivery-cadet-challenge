@@ -643,3 +643,19 @@ For troubleshooting, visit: https://docs.langchain.com/oss/python/langgraph/erro
 # 현재 로직이 LLM 기반이다 -> 즉 어떤걸 프롬프트로 하고 어떤걸 내부 백엔드로 로직으로 짯는지 그 구분과 이유를 설명해야함
 # 시각화 여부 너무 경직된 키워드 -> 좀더 자연스럽게 해야한다는걸 깨달음
 # FK PK 설정 -> 순수 사람이 vs PII 는 LMM이 자동 설정 후 사람이 최종검토
+
+
+오류:
+Expert 질문 (Window Function with PARTITION BY)에서 WITH ranked AS (SELECT ...) SELECT * FROM ranked 쿼리 생성 시
+SQLGenerationError: Unknown tables in query: {'ranked'} 에러 발생
+원인:
+validation.py의 _extract_table_names() 함수가 CTE (Common Table Expression) 임시 테이블을 실제 schema 테이블로 인식
+ranked는 WITH 절로 정의된 임시 테이블인데, schema 테이블 목록에 없어서 검증 실패
+수정 내용: src/core/validation.py
+새 함수 추가: _extract_cte_names() - CTE 이름 추출 (lines 63-89)
+검증 로직 수정: CTE 이름을 schema 테이블 검증에서 제외 (lines 180-197)
+
+cte_names = _extract_cte_names(sql_query)  # WITH ranked AS ... 에서 'ranked' 추출
+actual_tables = query_tables - cte_names    # CTE 제외한 실제 테이블만 검증
+결과:
+WITH ranked AS (SELECT ... RANK() OVER (PARTITION BY ...)) SELECT * FROM ranked 형태의 쿼리 정상 처리

@@ -15,7 +15,7 @@ def reset_database():
     try:
         with engine.connect() as conn:
             # Drop all tables with CASCADE option
-            tables = ["sales_transactions", "sales_customers", "sales_franchises", "sales_suppliers"]
+            tables = ["sales_transactions", "sales_customers", "sales_franchises", "sales_suppliers", "media_customer_reviews", "media_gold_reviews_chunked"]
             for table in tables:
                 conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE;"))
                 print(f"   Dropped table: {table}")

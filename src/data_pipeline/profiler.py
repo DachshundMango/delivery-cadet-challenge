@@ -2,6 +2,9 @@ import os
 import glob
 import json
 import pandas as pd
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from src.core.console import Console
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -50,24 +53,35 @@ def analyse_csv_file(file_path) -> dict:
 
 def analyse_all_csv(data_dir):
 
-	data_profile = {}
+	# Step 1: Scan CSV files
+	Console.step(1, 3, "Scanning CSV files")
 	csv_files = glob.glob(os.path.join(data_dir, '*.csv'))
+	Console.info(f"Found {len(csv_files)} tables")
 
+	# Step 2: Analyze each file
+	Console.step(2, 3, "Analyzing data structure")
+	data_profile = {}
 	for file_path in csv_files:
 		table_name = os.path.basename(file_path).replace('.csv','')
 		data_profile[table_name] = analyse_csv_file(file_path)
 
+		# Show info for each table
+		table_info = data_profile[table_name]
+		Console.info(f"{table_name}: {table_info['row_count']} rows, {len(table_info['columns'])} columns")
+
+	# Step 3: Save results
+	Console.step(3, 3, "Saving results")
 	output_path = os.path.join(CONFIG_DIR, 'data_profile.json')
 	with open(output_path, 'w', encoding='utf-8') as f:
 		json.dump(data_profile, f, indent=2, ensure_ascii=False, default=str)
-
-	print(f"Profiled {len(data_profile)} tables")
-	print(f"Saved to {output_path}")
+	Console.info(f"Saved to {output_path}")
 
 
 def main():
 	"""Profile all CSV files in data directory"""
+	Console.header("Profiler - Data Analysis")
 	analyse_all_csv(DATA_DIR)
+	Console.footer("Profiler completed")
 
 
 if __name__ == '__main__':

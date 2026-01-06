@@ -74,7 +74,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/DachshundMango/delivery-cadet-challenge.git
 cd cadet
 ```
 
@@ -103,6 +103,16 @@ PGADMIN_DEFAULT_PASSWORD=admin
 
 ### 3. Install Python Dependencies
 
+**Option A: Using Conda (Recommended)**
+```bash
+# Create conda environment from environment.yml
+conda env create -f environment.yml
+
+# Activate the environment
+conda activate cadet
+```
+
+**Option B: Using pip**
 ```bash
 pip install -r requirements.txt
 ```
@@ -112,6 +122,7 @@ pip install -r requirements.txt
 ```bash
 cd frontend
 pnpm install
+cd ..
 ```
 
 ### 5. Start PostgreSQL Database
@@ -126,6 +137,32 @@ This will start:
 - PgAdmin on port 8080 (http://localhost:8080)
 
 ## Database Setup
+
+### Quick Start (Automated)
+
+The easiest way to set up your database is using the automated pipeline:
+
+```bash
+# Activate conda environment
+conda activate cadet
+
+# Run automated setup (interactive)
+python src/setup.py
+```
+
+This will automatically run all 6 pipeline steps:
+1. **profiler** - Analyze CSV files
+2. **relationship_discovery** - Configure PK/FK (interactive)
+3. **load_data** - Load to PostgreSQL (may fail initially)
+4. **integrity_checker** - Check data integrity
+5. **transform_data** - Fix issues (interactive SQL console)
+6. **generate_schema** - Generate schema + PII detection
+
+The script pauses for user input when needed and provides clear progress updates.
+
+### Manual Setup (Step-by-Step)
+
+If you prefer to run each step individually:
 
 ### Data Pipeline Workflow
 
@@ -263,11 +300,38 @@ This script:
 
 ## Running the Application
 
-### Option 1: Full Stack (Recommended)
+### Option 1: One-Command Start (Easiest)
+
+```bash
+# Activate conda environment
+conda activate cadet
+
+# Start everything
+./start.sh
+```
+
+This script will:
+1. Check if `schema_info.json` exists
+2. If not, automatically run `python src/setup.py` (first-time setup)
+3. Start LangGraph server (port 2024)
+4. Start frontend (port 3000)
+5. Automatically open http://localhost:3000 in your browser
+
+**Reset and start fresh:**
+```bash
+./start.sh --reset
+```
+This will:
+- Delete all database tables
+- Remove all config files (keys.json, schema_info.json, etc.)
+- Run setup.py again
+- Start servers
+
+### Option 2: Manual Start (Full Stack)
 
 **Terminal 1 - Start LangGraph Server:**
 ```bash
-langgraph up
+langgraph dev
 ```
 Server runs on http://localhost:2024
 
@@ -281,7 +345,7 @@ Frontend runs on http://localhost:3000
 **Access the Application:**
 Open http://localhost:3000 in your browser.
 
-### Option 2: CLI Mode (Testing)
+### Option 3: CLI Mode (Testing)
 
 ```bash
 python3 src/cli.py
@@ -312,6 +376,7 @@ cadet/
 │   │
 │   ├── core/                     # Shared utilities
 │   │   ├── __init__.py           # Public API exports
+│   │   ├── console.py            # Unified CLI output formatting
 │   │   ├── db.py                 # Database connection management
 │   │   ├── logger.py             # Logging configuration
 │   │   ├── errors.py             # Custom exception classes
@@ -323,9 +388,8 @@ cadet/
 │   │   ├── schema_info.md        # Human-readable schema docs
 │   │   └── data_profile.json     # Data profiling statistics
 │   │
-│   ├── scripts/                  # Utility scripts
-│   │   └── reset_db.py           # Database reset utility
-│   │
+│   ├── setup.py                  # Automated pipeline orchestrator
+│   ├── reset_db.py               # Database + config reset utility
 │   └── cli.py                    # CLI entry point
 │
 ├── frontend/                     # Next.js frontend
@@ -347,7 +411,9 @@ cadet/
 │
 ├── docker-compose.yaml           # PostgreSQL + PgAdmin
 ├── langgraph.json                # LangGraph configuration
-├── requirements.txt              # Python dependencies
+├── start.sh                      # One-command startup script
+├── environment.yml               # Conda environment (cross-platform)
+├── requirements.txt              # Python dependencies (pip)
 ├── .env                          # Environment variables (create this)
 └── README.md                     # This file
 ```
@@ -600,6 +666,24 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 
 ## Troubleshooting
 
+### Reset Everything
+
+If you want to start completely fresh:
+
+```bash
+# Option 1: Using start.sh
+./start.sh --reset
+
+# Option 2: Manual reset
+python src/reset_db.py
+python src/setup.py
+```
+
+This will:
+- Drop all database tables
+- Delete all config files (keys.json, schema_info.json, data_profile.json)
+- Re-run the entire pipeline
+
 ### Database Connection Errors
 
 ```bash
@@ -619,7 +703,15 @@ docker-compose logs db
 FileNotFoundError: schema_info.json not found
 ```
 
-**Solution**: Run `python src/generate_schema.py`
+**Solution**: Run the automated setup:
+```bash
+python src/setup.py
+```
+
+Or run generate_schema manually:
+```bash
+python -m src.data_pipeline.generate_schema
+```
 
 ### LangGraph Server Port Conflict
 

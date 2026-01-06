@@ -1,0 +1,280 @@
+{
+  "tables": {
+    "media_customer_reviews": {
+      "pk": "new_id",
+      "fks": [
+        {
+          "col": "franchiseID",
+          "ref_table": "sales_franchises",
+          "ref_col": "franchiseID"
+        }
+      ],
+      "columns": [
+        {
+          "name": "review",
+          "type": "text"
+        },
+        {
+          "name": "franchiseID",
+          "type": "bigint"
+        },
+        {
+          "name": "review_date",
+          "type": "text"
+        },
+        {
+          "name": "new_id",
+          "type": "bigint"
+        }
+      ]
+    },
+    "media_gold_reviews_chunked": {
+      "pk": "",
+      "fks": [
+        {
+          "col": "franchiseID",
+          "ref_table": "sales_franchises",
+          "ref_col": "franchiseID"
+        }
+      ],
+      "columns": [
+        {
+          "name": "franchiseID",
+          "type": "bigint"
+        },
+        {
+          "name": "review_date",
+          "type": "text"
+        },
+        {
+          "name": "chunked_text",
+          "type": "text"
+        },
+        {
+          "name": "chunk_id",
+          "type": "text"
+        },
+        {
+          "name": "review_uri",
+          "type": "text"
+        }
+      ]
+    },
+    "sales_customers": {
+      "pk": "customerID",
+      "fks": [],
+      "columns": [
+        {
+          "name": "customerID",
+          "type": "bigint"
+        },
+        {
+          "name": "first_name",
+          "type": "text"
+        },
+        {
+          "name": "last_name",
+          "type": "text"
+        },
+        {
+          "name": "email_address",
+          "type": "text"
+        },
+        {
+          "name": "phone_number",
+          "type": "text"
+        },
+        {
+          "name": "address",
+          "type": "text"
+        },
+        {
+          "name": "city",
+          "type": "text"
+        },
+        {
+          "name": "state",
+          "type": "text"
+        },
+        {
+          "name": "country",
+          "type": "text"
+        },
+        {
+          "name": "continent",
+          "type": "text"
+        },
+        {
+          "name": "postal_zip_code",
+          "type": "bigint"
+        },
+        {
+          "name": "gender",
+          "type": "text"
+        }
+      ]
+    },
+    "sales_franchises": {
+      "pk": "franchiseID",
+      "fks": [
+        {
+          "col": "supplierID",
+          "ref_table": "sales_suppliers",
+          "ref_col": "supplierID"
+        }
+      ],
+      "columns": [
+        {
+          "name": "franchiseID",
+          "type": "bigint"
+        },
+        {
+          "name": "name",
+          "type": "text"
+        },
+        {
+          "name": "city",
+          "type": "text"
+        },
+        {
+          "name": "district",
+          "type": "text"
+        },
+        {
+          "name": "zipcode",
+          "type": "text"
+        },
+        {
+          "name": "country",
+          "type": "text"
+        },
+        {
+          "name": "size",
+          "type": "text"
+        },
+        {
+          "name": "longitude",
+          "type": "double precision"
+        },
+        {
+          "name": "latitude",
+          "type": "double precision"
+        },
+        {
+          "name": "supplierID",
+          "type": "bigint"
+        }
+      ]
+    },
+    "sales_suppliers": {
+      "pk": "supplierID",
+      "fks": [],
+      "columns": [
+        {
+          "name": "supplierID",
+          "type": "bigint"
+        },
+        {
+          "name": "name",
+          "type": "text"
+        },
+        {
+          "name": "ingredient",
+          "type": "text"
+        },
+        {
+          "name": "continent",
+          "type": "text"
+        },
+        {
+          "name": "city",
+          "type": "text"
+        },
+        {
+          "name": "district",
+          "type": "text"
+        },
+        {
+          "name": "size",
+          "type": "text"
+        },
+        {
+          "name": "longitude",
+          "type": "double precision"
+        },
+        {
+          "name": "latitude",
+          "type": "double precision"
+        },
+        {
+          "name": "approved",
+          "type": "text"
+        }
+      ]
+    },
+    "sales_transactions": {
+      "pk": "transactionID",
+      "fks": [
+        {
+          "col": "customerID",
+          "ref_table": "sales_customers",
+          "ref_col": "customerID"
+        },
+        {
+          "col": "franchiseID",
+          "ref_table": "sales_franchises",
+          "ref_col": "franchiseID"
+        }
+      ],
+      "columns": [
+        {
+          "name": "transactionID",
+          "type": "bigint"
+        },
+        {
+          "name": "customerID",
+          "type": "bigint"
+        },
+        {
+          "name": "franchiseID",
+          "type": "bigint"
+        },
+        {
+          "name": "dateTime",
+          "type": "text"
+        },
+        {
+          "name": "product",
+          "type": "text"
+        },
+        {
+          "name": "quantity",
+          "type": "bigint"
+        },
+        {
+          "name": "unitPrice",
+          "type": "bigint"
+        },
+        {
+          "name": "totalPrice",
+          "type": "bigint"
+        },
+        {
+          "name": "paymentMethod",
+          "type": "text"
+        },
+        {
+          "name": "cardNumber",
+          "type": "bigint"
+        }
+      ]
+    }
+  },
+  "llm_prompt": "1. Table \"media_customer_reviews\"\n   - Primary Key: \"new_id\"\n   - Foreign Keys:\n     - \"franchiseID\" -> \"sales_franchises\"(\"franchiseID\")\n   - Columns:\n     - \"review\" (text)\n     - \"franchiseID\" (bigint)\n     - \"review_date\" (text)\n     - \"new_id\" (bigint)\n\n2. Table \"media_gold_reviews_chunked\"\n   - Foreign Keys:\n     - \"franchiseID\" -> \"sales_franchises\"(\"franchiseID\")\n   - Columns:\n     - \"franchiseID\" (bigint)\n     - \"review_date\" (text)\n     - \"chunked_text\" (text)\n     - \"chunk_id\" (text)\n     - \"review_uri\" (text)\n\n3. Table \"sales_customers\"\n   - Primary Key: \"customerID\"\n   - Columns:\n     - \"customerID\" (bigint)\n     - \"first_name\" (text)\n     - \"last_name\" (text)\n     - \"email_address\" (text)\n     - \"phone_number\" (text)\n     - \"address\" (text)\n     - \"city\" (text)\n     - \"state\" (text)\n     - \"country\" (text)\n     - \"continent\" (text)\n     - \"postal_zip_code\" (bigint)\n     - \"gender\" (text)\n\n4. Table \"sales_franchises\"\n   - Primary Key: \"franchiseID\"\n   - Foreign Keys:\n     - \"supplierID\" -> \"sales_suppliers\"(\"supplierID\")\n   - Columns:\n     - \"franchiseID\" (bigint)\n     - \"name\" (text)\n     - \"city\" (text)\n     - \"district\" (text)\n     - \"zipcode\" (text)\n     - \"country\" (text)\n     - \"size\" (text)\n     - \"longitude\" (double precision)\n     - \"latitude\" (double precision)\n     - \"supplierID\" (bigint)\n\n5. Table \"sales_suppliers\"\n   - Primary Key: \"supplierID\"\n   - Columns:\n     - \"supplierID\" (bigint)\n     - \"name\" (text)\n     - \"ingredient\" (text)\n     - \"continent\" (text)\n     - \"city\" (text)\n     - \"district\" (text)\n     - \"size\" (text)\n     - \"longitude\" (double precision)\n     - \"latitude\" (double precision)\n     - \"approved\" (text)\n\n6. Table \"sales_transactions\"\n   - Primary Key: \"transactionID\"\n   - Foreign Keys:\n     - \"customerID\" -> \"sales_customers\"(\"customerID\")\n     - \"franchiseID\" -> \"sales_franchises\"(\"franchiseID\")\n   - Columns:\n     - \"transactionID\" (bigint)\n     - \"customerID\" (bigint)\n     - \"franchiseID\" (bigint)\n     - \"dateTime\" (text)\n     - \"product\" (text)\n     - \"quantity\" (bigint)\n     - \"unitPrice\" (bigint)\n     - \"totalPrice\" (bigint)\n     - \"paymentMethod\" (text)\n     - \"cardNumber\" (bigint)\n",
+  "pii_columns": {
+    "sales_customers": [
+      "first_name",
+      "last_name"
+    ]
+  }
+}

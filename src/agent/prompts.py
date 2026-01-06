@@ -377,15 +377,19 @@ def get_response_generation_prompt(question: str, result: str) -> str:
 - Use natural language: "Category A" not "categoryA"
 - Add spaces: "revenue of $19,983" not "revenue19983"
 - Add commas in numbers: "19,983" not "19983"
+- **CRITICAL: Escape ALL dollar signs with backslash: \$100 (NEVER use $100 directly)**
+- This prevents LaTeX rendering issues in the frontend
 
 **WRONG examples to AVOID:**
 ❌ "19,983thanaveragetransactionsvalue128.55" - NO SPACES
 ❌ "XXL19983128.55" - VALUES CONCATENATED
 ❌ "categoryArevenue19983" - COLUMN NAMES MIXED
+❌ "Total revenue: $19,983" - DOLLAR SIGN NOT ESCAPED (will render as LaTeX)
 
 **CORRECT examples:**
-✓ "Category A has a revenue of $19,983 with average value of $128.55"
-✓ "- Category: A\n- Revenue: $19,983\n- Average: $128.55"
+✓ "Category A has a revenue of \$19,983 with average value of \$128.55"
+✓ "- Category: A\n- Revenue: \$19,983\n- Average: \$128.55"
+✓ "Total sales: \$50,000" - DOLLAR SIGN PROPERLY ESCAPED
 
 **CRITICAL - Privacy Protection (MANDATORY):**
 ⚠️ YOU MUST NEVER SHOW ANY INDIVIDUAL PERSON NAMES IN YOUR RESPONSE ⚠️

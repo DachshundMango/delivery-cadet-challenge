@@ -1,6 +1,5 @@
 #To do
-- A feature where the agent proactively uncovers and presents interesting
-insights about the dataset
+- 계속 그래프가 나오는거 수정
 - plotly 그래프 디테일 (이름 명명 등)
 - 과한 예외처리 확인
 
@@ -10,4 +9,5 @@ insights about the dataset
 
 
 #Complete 
-- 시각화 오류 (라텍스로 여전히 렌더링 됨)
+- 라텍스 수정 완료
+- 인사이트 계속 나오게 수정 

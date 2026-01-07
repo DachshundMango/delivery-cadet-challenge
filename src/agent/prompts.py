@@ -16,40 +16,55 @@ Usage:
 
 def get_intent_classification_prompt() -> str:
     """
-    Generate prompt for classifying user intent (sql vs general).
+    Generate prompt for classifying user intent (sql vs general) with reasoning.
 
     Returns:
         Prompt string for intent classification
     """
-    return """Classify user input into: sql or general
+    return """You are an intent classifier for a database query assistant. Analyze the user's input carefully.
+
+**Classification Task:** Determine if the user wants to query data (sql) or have general conversation (general).
+
+**Decision Process:**
+1. Check if the input is a greeting or meta-question about the system itself → general
+2. Check if the input requests data, statistics, analysis, or visualization → sql
+3. When in doubt, default to sql (users mainly want data queries)
 
 **Few-Shot Examples:**
 
 User: "Show me top 10 records"
+Reasoning: Requests data retrieval
 Classification: sql
 
 User: "What is the total count?"
+Reasoning: Requests numerical aggregation
 Classification: sql
 
 User: "Which item has the highest value?"
+Reasoning: Requests ranking/comparison from data
 Classification: sql
 
 User: "Hello"
+Reasoning: Simple greeting, no data request
 Classification: general
 
 User: "What can you do?"
+Reasoning: Meta-question about system capabilities
 Classification: general
 
 User: "Create a chart"
+Reasoning: Requests data visualization (requires data query)
 Classification: sql
 
 User: "Compare A and B"
+Reasoning: Requests data comparison
 Classification: sql
 
-**Rules:**
-- ANY question about data, numbers, rankings, comparisons → sql
-- ONLY greetings (hello/hi) or capability questions (what can you do) → general
-- DEFAULT → sql
+**Classification Rules:**
+- ANY question about data, numbers, rankings, comparisons, trends → sql
+- ANY request for charts, visualizations, analysis → sql
+- ONLY greetings (hello/hi/hey) or capability questions (what can you do) → general
+- DEFAULT → sql (assume user wants data)
 
 Return ONLY the word sql or general - no markdown, no explanations, no punctuation."""
 
@@ -92,19 +107,28 @@ Respond briefly and clearly."""
 
 def get_sql_generation_prompt(schema_info: str, user_question: str) -> str:
     """
-    Generate prompt for SQL query generation.
+    Generate prompt for SQL query generation with Chain-of-Thought reasoning.
 
     Args:
         schema_info: Database schema information (tables, columns, relationships)
         user_question: The user's natural language question
 
     Returns:
-        Formatted prompt string
+        Formatted prompt string with structured reasoning steps
     """
-    return f"""Generate PostgreSQL SELECT query for the user's question using ONLY the tables in the schema below.
+    return f"""You are an expert PostgreSQL query generator. Analyze the question carefully before generating SQL.
 
 **Database Schema:**
 {schema_info}
+
+**User Question:** {user_question}
+
+**STEP-BY-STEP APPROACH:**
+Before writing the query, think through:
+1. Which tables from the schema contain the data needed?
+2. What foreign key relationships connect these tables?
+3. What columns should be selected, filtered, or aggregated?
+4. Is this a simple query or does it need CTEs/window functions?
 
 **CRITICAL RULES:**
 
@@ -124,9 +148,7 @@ def get_sql_generation_prompt(schema_info: str, user_question: str) -> str:
    - CTEs (WITH clause): ALWAYS use CTE instead of subqueries in FROM clause
    - Example: WITH ranked AS (SELECT ... RANK() OVER ...) SELECT * FROM ranked WHERE rank = 1
 
-**User Question:** {user_question}
-
-Return ONLY the SQL query below. NO explanations, NO markdown, NO text before or after the query:
+After thinking through the steps above, return ONLY the SQL query below. NO explanations, NO markdown, NO text before or after the query:
 """
 
 
@@ -148,10 +170,18 @@ def get_visualization_prompt(user_question: str, sql_result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = sql_result[:200] + "..." if len(sql_result) > 200 else sql_result
 
-    return f"""Should this question be answered with a visualization?
+    return f"""You are a data visualization specialist. Analyze whether this data would benefit from a chart.
 
 **Question:** {user_question}
 **Data sample:** {truncated_result}
+
+**Analysis Steps:**
+1. Examine the user's question - do they explicitly request a chart?
+2. Look at the data structure - how many rows and columns?
+3. Identify the data type - is it categorical, numerical, time-series?
+4. Consider if visualization adds value beyond text
+
+**Decision Criteria:**
 
 **Return "yes" if:**
 1. User EXPLICITLY asks for: "chart", "visualize", "plot", "graph", "visualization"
@@ -162,13 +192,14 @@ def get_visualization_prompt(user_question: str, sql_result: str) -> str:
 1. Simple lookup or count ("how many", "what is the total")
 2. User asks to "list" or "show" without visual intent
 3. Single value answer
+4. Only 1-2 rows of data (insufficient for meaningful chart)
 
 **Be conservative:** When in doubt, prefer "no". Only suggest visualization when it clearly adds value.
 
-**Chart type:**
-- Comparison/ranking data → "bar"
-- Time series/trends → "line"
-- Parts of whole/proportions → "pie"
+**Chart Type Selection:**
+- Comparison/ranking data (e.g., top 10, by category) → "bar"
+- Time series/trends (e.g., daily, monthly, over time) → "line"
+- Parts of whole/proportions (e.g., percentage breakdown) → "pie"
 
 Return ONLY the JSON below. NO explanations, NO text before or after. Just the JSON object:
 {{"visualise": "yes", "chart_type": "bar"}}
@@ -360,10 +391,18 @@ def get_response_generation_prompt(question: str, result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = result[:1000] if len(result) > 1000 else result
 
-    return f"""You are answering a data question. Parse the JSON results carefully and write a natural language response.
+    return f"""You are a data analyst converting SQL results into natural language. Think step-by-step before responding.
 
 **Question:** {question}
 **Data (JSON):** {truncated_result}
+
+**ANALYSIS STEPS:**
+Before writing your answer:
+1. First, parse the JSON structure - identify what columns are present
+2. Understand what each row represents in relation to the question
+3. Identify the key insight or pattern that answers the question
+4. Check for any surprising trends or outliers in the data
+5. Formulate a clear, concise natural language response
 
 **CRITICAL INSTRUCTIONS:**
 1. Parse the JSON properly - each object has key-value pairs
@@ -414,7 +453,34 @@ def get_response_generation_prompt(question: str, result: str) -> str:
 
 **BEFORE you write your answer, VERIFY that no individual person names appear in your response.**
 
-**Answer:**"""
+**Proactive Insight Discovery (MANDATORY):**
+After answering the question, you MUST analyze the data and provide 1-2 additional insights that the user didn't explicitly ask for.
+
+Look for:
+1. **Concentration patterns**: Top N items account for large portion (e.g., "Top 3 items account for 75% of total")
+2. **Outliers/Anomalies**: Values significantly higher/lower than average (e.g., "One value is 5x higher than average")
+3. **Imbalances**: Uneven distribution across categories (e.g., "One category dominates with 80% share")
+4. **Correlations**: Interesting relationships between fields (e.g., "Field X shows 3x higher values when Field Y is larger")
+
+**Format your response in TWO sections:**
+
+**Answer:**
+[Your direct answer to the question]
+
+💡 **Interesting Insight:**
+[1-2 sentences about a pattern you discovered in the data that the user didn't ask about]
+
+**Rules for insights:**
+- Base insights ONLY on the actual data shown in the results
+- Be specific with numbers and percentages
+- Keep it brief (1-2 sentences max)
+- Focus on actionable or surprising patterns
+- If no interesting pattern exists, write "No significant patterns detected"
+
+**Example structure:**
+Answer: The top 3 entries are Person #1 with \$5,000, Person #2 with \$4,200, and Person #3 with \$3,800.
+
+💡 **Interesting Insight:** These top 3 entries account for 65% of the total, showing a high concentration pattern."""
 
 
 # ===============================================================

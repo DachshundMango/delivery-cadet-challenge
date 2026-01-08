@@ -901,5 +901,96 @@
         ]
       }
     }
+  },
+  "sales_suppliers_missing_suppliers": {
+    "file_path": "/Users/chanwoobae/Desktop/cadet/data/sales_suppliers_missing_suppliers.csv",
+    "row_count": 21,
+    "columns": {
+      "supplierID": {
+        "dtype": "int64",
+        "null_count": 0,
+        "null_ratio": 0.0,
+        "unique_count": 21,
+        "unique_ratio": 1.0,
+        "is_unique": true,
+        "has_nulls": false,
+        "has_id_pattern": true,
+        "sample_values": [
+          4000027,
+          4000028,
+          4000029,
+          4000030,
+          4000031
+        ]
+      },
+      "Name": {
+        "dtype": "object",
+        "null_count": 0,
+        "null_ratio": 0.0,
+        "unique_count": 17,
+        "unique_ratio": 0.8095238095238095,
+        "is_unique": false,
+        "has_nulls": false,
+        "has_id_pattern": false,
+        "sample_values": [
+          "Wheat Flour Co.",
+          "Sweet Sugar Co.",
+          "Dairy Butter Co.",
+          "Poultry Eggs Co.",
+          "Extract Vanilla Co."
+        ]
+      },
+      "Ingredient": {
+        "dtype": "object",
+        "null_count": 0,
+        "null_ratio": 0.0,
+        "unique_count": 10,
+        "unique_ratio": 0.47619047619047616,
+        "is_unique": false,
+        "has_nulls": false,
+        "has_id_pattern": false,
+        "sample_values": [
+          "flour",
+          "sugar",
+          "butter",
+          "eggs",
+          "vanilla"
+        ]
+      },
+      "City": {
+        "dtype": "object",
+        "null_count": 0,
+        "null_ratio": 0.0,
+        "unique_count": 10,
+        "unique_ratio": 0.47619047619047616,
+        "is_unique": false,
+        "has_nulls": false,
+        "has_id_pattern": false,
+        "sample_values": [
+          "Tokyo",
+          "New York",
+          "Nagoya",
+          "New York",
+          "Nagoya"
+        ]
+      },
+      "Continent": {
+        "dtype": "object",
+        "null_count": 0,
+        "null_ratio": 0.0,
+        "unique_count": 3,
+        "unique_ratio": 0.14285714285714285,
+        "is_unique": false,
+        "has_nulls": false,
+        "has_id_pattern": false,
+        "sample_values": [
+          "Asia",
+          "North America",
+          "Asia",
+          "North America",
+          "Asia"
+        ]
+      }
+    }
   }
 }

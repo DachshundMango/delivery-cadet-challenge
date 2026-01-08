@@ -21,7 +21,8 @@ def load_csv_to_db(file_path: str, table_name: str, engine: Engine) -> None:
 
     try:
         Console.info(f"Loading {table_name}...")
-        df = pd.read_csv(file_path)
+        # Use utf-8-sig to handle potential BOM in CSV files
+        df = pd.read_csv(file_path, encoding='utf-8-sig')
         df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
         Console.info(f"{table_name}: {len(df)} rows loaded")
 

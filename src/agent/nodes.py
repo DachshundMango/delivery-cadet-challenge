@@ -221,7 +221,7 @@ def read_question(state: SQLAgentState) -> dict:
         logger.info(f"Question extracted: {content[:50]}...")
         return {"user_question": content}
 
-    except Exception as e:
+    except (AttributeError, KeyError, TypeError) as e:
         logger.error(f"Failed to extract question: {e}")
         raise ValidationError(f"Message extraction failed: {e}")
 
@@ -403,9 +403,6 @@ def generate_SQL(state: SQLAgentState) -> dict:
     except (SchemaLoadError, SQLGenerationError, ValidationError) as e:
         logger.error(f"SQL generation failed: {e}")
         raise
-    except Exception as e:
-        logger.error(f"Unexpected error in SQL generation: {e}")
-        raise LLMError(f"SQL generation failed: {e}")
 
 def execute_SQL(state: SQLAgentState) -> dict:
     """
@@ -521,9 +518,6 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
     except json.JSONDecodeError:
         logger.warning("Failed to parse LLM response as JSON")
         return {"plotly_data": None}
-    except Exception as e:
-        logger.error(f"Visualization failed: {e}")
-        return {"plotly_data": None}
 
 def create_plotly_chart(sql_result, chart_type):
     """Generate Plotly chart JSON from SQL results"""
@@ -532,7 +526,7 @@ def create_plotly_chart(sql_result, chart_type):
     except json.JSONDecodeError:
         try:
             sql_list = ast.literal_eval(sql_result)
-        except Exception as e:
+        except (ValueError, SyntaxError) as e:
             logger.warning(f"Failed to parse SQL result for charting: {e}")
             return None
     

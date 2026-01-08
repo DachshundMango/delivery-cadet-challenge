@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from src.core.db import get_db_engine
 from src.core.logger import setup_logger
 from src.core.console import Console
+from src.core.errors import LLMError
 from src.data_pipeline.pii_discovery import (
     load_data_profile,
     collect_column_samples,
@@ -50,7 +51,7 @@ def get_column_info(engine: Engine, table_name: str) -> list[tuple[str, str]]:
         with engine.connect() as conn:
             result = conn.execute(text(query), {"table_name": table_name})
             return [(row[0], row[1]) for row in result]
-    except (SQLAlchemyError, AttributeError) as e:
+    except SQLAlchemyError as e:
         logger.warning(f"Could not get columns for {table_name}: {e}")
         return []
 
@@ -172,9 +173,9 @@ def main() -> None:
                 # Display interactive report
                 display_report_and_confirm(pii_columns, column_data)
                 Console.info("PII detection completed")
-            except Exception as e:
+            except (FileNotFoundError, json.JSONDecodeError, KeyError, LLMError) as e:
                 logger.warning(f"PII detection failed: {e}")
-                Console.warning(f"PII detection skipped due to error", str(e)[:100])
+                Console.warning("PII detection skipped", str(e)[:100])
                 pii_columns = {}
         else:
             logger.warning(f"Data profile not found at {DATA_PROFILE_PATH}")

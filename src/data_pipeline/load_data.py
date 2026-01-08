@@ -3,6 +3,7 @@ import glob
 import json
 import pandas as pd
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from dotenv import load_dotenv
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -24,7 +25,7 @@ def load_csv_to_db(file_path: str, table_name: str, engine: Engine) -> None:
         df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
         Console.info(f"{table_name}: {len(df)} rows loaded")
 
-    except Exception as e:
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, SQLAlchemyError) as e:
         Console.error(f"Failed to load {table_name}", str(e)[:100])
 
 def add_primary_key(keys: dict, table_name: str, engine: Engine) -> bool:
@@ -49,7 +50,7 @@ def add_primary_key(keys: dict, table_name: str, engine: Engine) -> bool:
             conn.commit()
         Console.success(f"Primary key: {table}.{pk}")
         return False
-    except Exception as e:
+    except SQLAlchemyError as e:
         Console.warning(f"Primary key {table}.{pk} failed", f"Reason: {str(e)[:100]}")
         return True
 
@@ -80,7 +81,7 @@ def add_foreign_key(keys: dict, table_name: str, engine: Engine) -> bool:
                 conn.execute(text(sql))
                 conn.commit()
             Console.success(f"Foreign key: {table}.{col} -> {ref_table}.{ref_col}")
-        except Exception as e:
+        except SQLAlchemyError as e:
             failed = True
             Console.warning(f"Foreign key {table}.{col} -> {ref_table} failed", f"Reason: {str(e)[:100]}")
             continue

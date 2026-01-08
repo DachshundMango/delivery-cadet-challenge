@@ -30,41 +30,19 @@ def get_intent_classification_prompt() -> str:
 2. Check if the input requests data, statistics, analysis, or visualization → sql
 3. When in doubt, default to sql (users mainly want data queries)
 
-**Few-Shot Examples:**
+**Examples:**
+"Show me top 10 records" → sql
+"What is the total count?" → sql
+"Which item has the highest value?" → sql
+"Create a chart" → sql
+"Compare A and B" → sql
+"Hello" → general
+"What can you do?" → general
 
-User: "Show me top 10 records"
-Reasoning: Requests data retrieval
-Classification: sql
-
-User: "What is the total count?"
-Reasoning: Requests numerical aggregation
-Classification: sql
-
-User: "Which item has the highest value?"
-Reasoning: Requests ranking/comparison from data
-Classification: sql
-
-User: "Hello"
-Reasoning: Simple greeting, no data request
-Classification: general
-
-User: "What can you do?"
-Reasoning: Meta-question about system capabilities
-Classification: general
-
-User: "Create a chart"
-Reasoning: Requests data visualization (requires data query)
-Classification: sql
-
-User: "Compare A and B"
-Reasoning: Requests data comparison
-Classification: sql
-
-**Classification Rules:**
-- ANY question about data, numbers, rankings, comparisons, trends → sql
-- ANY request for charts, visualizations, analysis → sql
-- ONLY greetings (hello/hi/hey) or capability questions (what can you do) → general
-- DEFAULT → sql (assume user wants data)
+**Rules:**
+- Data/numbers/rankings/comparisons/trends/charts → sql
+- Greetings or capability questions → general
+- DEFAULT → sql
 
 Return ONLY the word sql or general - no markdown, no explanations, no punctuation."""
 
@@ -136,61 +114,35 @@ Before writing the query, think through:
 
 **CRITICAL RULES:**
 
-1. **Use EXACT table names from schema** - Never abbreviate or invent names
-   ✓ CORRECT: FROM orders (exact name from schema)
-   ✓ CORRECT: FROM orders o (with alias 'o')
-   ✗ WRONG: FROM ord (no such table - don't abbreviate)
-   ✗ WRONG: FROM order_data (no such table - use exact name)
+1. **Use EXACT table names from schema** - Never abbreviate or invent
+   ✓ FROM orders o (exact + alias)
+   ✗ FROM ord (no abbreviation)
 
-2. **Table aliases are ALLOWED and RECOMMENDED** for readability:
-   - You can use short aliases like 'o', 'u', 't' after table names
-   - These aliases are NOT real tables - they're just shorthand for the query
-   ✓ CORRECT: FROM orders o JOIN users u ON o."user_id" = u."id"
-   ✓ CORRECT: WITH ranked AS (SELECT ... FROM orders o) SELECT * FROM ranked WHERE ...
+2. **Table aliases ALLOWED** - Use short aliases (o, u, t) for readability
+   ✓ FROM orders o JOIN users u ON o."user_id" = u."id"
 
-3. **Quote ALL columns** - PostgreSQL is case-sensitive: t."columnName" not t.columnName
+3. **Quote ALL columns** - PostgreSQL case-sensitive: t."columnName"
 
-4. **Single query only** - No semicolons in middle, NO comments (-- or /* */), no temp tables
+4. **Single query only** - No semicolons, NO comments (-- or /**/), no temp tables
 
-5. **CRITICAL: Use CTEs, NOT subqueries in FROM clause**
-   ✓ CORRECT: WITH temp AS (SELECT ...) SELECT * FROM temp
-   ✗ WRONG: SELECT * FROM (SELECT ...) AS temp
-   Why: CTEs are more readable, easier to debug, and preferred by PostgreSQL
+5. **Use CTEs, NOT subqueries**
+   ✓ WITH temp AS (SELECT ...) SELECT * FROM temp
+   ✗ SELECT * FROM (SELECT ...) AS temp
 
-6. **Query complexity - Choose the right approach based on the question:**
+6. **Query complexity:**
+   a) **Simple "top N" globally**: ORDER BY + LIMIT
+      "Show top 10 items" → SELECT "item", SUM("amount") FROM orders GROUP BY "item" ORDER BY SUM("amount") DESC LIMIT 10
 
-   a) **Simple "top N" globally**: Use ORDER BY + LIMIT
-      Example: "Show top 10 items by total amount"
-      → SELECT "item", SUM("amount") as total
-        FROM orders
-        GROUP BY "item"
-        ORDER BY total DESC LIMIT 10
+   b) **Ranking per group**: PARTITION BY + window functions
+      "Show top item PER REGION" → WITH ranked AS (SELECT "region", "item", RANK() OVER (PARTITION BY "region" ORDER BY SUM("amount") DESC) ...) SELECT * FROM ranked WHERE rank = 1
 
-   b) **Ranking WITHIN groups (per category/region/etc)**: Use window functions with PARTITION BY
-      Example: "Show top item PER REGION"
-      → WITH ranked AS (
-          SELECT "region", "item", SUM("amount") as total,
-                 RANK() OVER (PARTITION BY "region" ORDER BY SUM("amount") DESC) as rank
-          FROM orders o
-          JOIN users u ON o."user_id" = u."id"
-          GROUP BY "region", "item"
-        )
-        SELECT * FROM ranked WHERE rank = 1
+   c) **Running totals**: SUM() OVER (ORDER BY ...)
+      "Cumulative total per day" → SELECT "date", SUM("amount"), SUM(SUM("amount")) OVER (ORDER BY "date") as cumulative FROM orders GROUP BY "date"
 
-   c) **Running totals / Cumulative sums**: Use window functions with ORDER BY (no PARTITION BY)
-      Example: "Calculate running cumulative total per day"
-      → SELECT "date",
-               SUM("amount") as daily_total,
-               SUM(SUM("amount")) OVER (ORDER BY "date" ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cumulative_total
-        FROM orders
-        GROUP BY "date"
-        ORDER BY "date"
+   d) **Multi-step logic**: CTE (WITH clause)
+      WITH temp AS (SELECT ...) SELECT * FROM temp
 
-   d) **Multi-step logic**: ALWAYS use CTEs (WITH clause)
-      NEVER use subqueries in FROM clause - always convert to CTE
-      Example: WITH daily_data AS (SELECT ... FROM orders) SELECT * FROM daily_data
-
-7. **IMPORTANT: Honor user requests** - If the user explicitly asks for "window function", "PARTITION BY", or specific SQL features, USE THEM
+7. **Honor user requests** - Use explicitly requested SQL features
 </instructions>
 
 <output_format>
@@ -266,31 +218,13 @@ Only return "yes" if the user EXPLICITLY requests a visualization using specific
   Example: "List all products" → NO
   Example: "Show me the total revenue" → NO
 
-**Few-Shot Examples:**
-
-Q: "What are the top 10 products by sales?"
-A: {{"visualise": "no"}}
-Reason: No explicit chart keyword
-
-Q: "Show me revenue trends over time"
-A: {{"visualise": "no"}}
-Reason: "trends" is not an explicit chart keyword
-
-Q: "Create a bar chart of top 10 products"
-A: {{"visualise": "yes", "chart_type": "bar"}}
-Reason: Explicit "chart" keyword + chart type specified
-
-Q: "Visualize the sales by region"
-A: {{"visualise": "yes", "chart_type": "bar"}}
-Reason: Explicit "visualize" keyword
-
-Q: "Don't make a chart, just show the numbers"
-A: {{"visualise": "no"}}
-Reason: Explicit negative instruction
-
-Q: "Compare A and B"
-A: {{"visualise": "no"}}
-Reason: No explicit visualization keyword
+**Examples:**
+"What are the top 10 products by sales?" → {{"visualise": "no"}}
+"Show me revenue trends over time" → {{"visualise": "no"}}
+"Create a bar chart of top 10 products" → {{"visualise": "yes", "chart_type": "bar"}}
+"Visualize the sales by region" → {{"visualise": "yes", "chart_type": "bar"}}
+"Don't make a chart, just show the numbers" → {{"visualise": "no"}}
+"Compare A and B" → {{"visualise": "no"}}
 
 **Chart Type Selection (only if visualise="yes"):**
 - Comparison/ranking → "bar"
@@ -508,47 +442,25 @@ Before writing your answer:
 4. NEVER concatenate values without spaces or punctuation
 5. Use bullet points for lists (one item per line)
 
-**Response format:**
-- Start each item with a bullet point or number
-- Use natural language: "Category A" not "categoryA"
-- Add spaces: "amount of \$19,983" not "amount19983"
+**Formatting:**
+- Use bullet points/numbers, natural language, proper spacing
 - Add commas in numbers: "19,983" not "19983"
-- **CRITICAL: Escape ALL dollar signs with backslash: \$100 (NEVER use $100 directly)**
-- This prevents LaTeX rendering issues in the frontend
-
-**WRONG examples to AVOID:**
-❌ "19,983thanaveragetransactionsvalue128.55" - NO SPACES
-❌ "XXL19983128.55" - VALUES CONCATENATED
-❌ "categoryAamount19983" - COLUMN NAMES MIXED
-❌ "Total amount: $19,983" - DOLLAR SIGN NOT ESCAPED (will render as LaTeX)
-
-**CORRECT examples:**
-✓ "Category A has an amount of \$19,983 with average value of \$128.55"
-✓ "- Category: A\n- Amount: \$19,983\n- Average: \$128.55"
-✓ "Total amount: \$50,000" - DOLLAR SIGN PROPERLY ESCAPED
-
-**CRITICAL - Privacy Protection (MANDATORY):**
-⚠️ YOU MUST NEVER SHOW ANY INDIVIDUAL PERSON NAMES IN YOUR RESPONSE ⚠️
-
-- SCAN the entire query result for ANY individual person names
-- Replace EVERY SINGLE occurrence with "Person #N" using sequential numbering
-- This applies to: firstName, lastName, fullName, name fields (when referring to people)
-- DO NOT mask: organization names, company names, business names, product names, location names
+- **CRITICAL: Escape dollar signs: \$100 NOT $100** (prevents LaTeX rendering)
 
 **Examples:**
-❌ WRONG: "The top person is John Smith with $1000"
-✅ CORRECT: "The top person is Person #1 with $1000"
+✓ "Category A: \$19,983 with average \$128.55"
+❌ "categoryA19983" (no spaces, no formatting)
 
-❌ WRONG: "1. Alice Johnson - $800, 2. Bob Williams - $500"
-✅ CORRECT: "1. Person #1 - $800, 2. Person #2 - $500"
+**CRITICAL - Privacy Protection:**
+⚠️ NEVER show individual person names - Replace with "Person #N"
 
-❌ WRONG: "People include Sarah, Michael, and David"
-✅ CORRECT: "People include Person #1, Person #2, and Person #3"
+- Mask: firstName, lastName, fullName (individual people)
+- Keep: organization names, company names, locations
 
-✅ CORRECT: "Top organization: Acme Corp" (business name, keep as-is)
-✅ CORRECT: "Company: Global Services Inc." (company name, keep as-is)
-
-**BEFORE you write your answer, VERIFY that no individual person names appear in your response.**
+**Examples:**
+❌ "John Smith - \$1000"
+✅ "Person #1 - \$1000"
+✅ "Acme Corp - \$1000" (business name, keep)
 
 **Proactive Insight Discovery (MANDATORY):**
 After answering the question, you MUST analyze the data and provide 1-2 additional insights that the user didn't explicitly ask for.

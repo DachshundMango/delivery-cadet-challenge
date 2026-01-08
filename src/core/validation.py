@@ -246,5 +246,5 @@ def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
         logger.info(f"SQL validation passed: {len(actual_tables)} schema tables, {len(cte_names)} CTEs, {len(subquery_aliases)} subquery aliases")
         return True
 
-    except Exception as e:
+    except (IndexError, ValueError, AttributeError) as e:
         raise SQLGenerationError(f"SQL parsing failed: {e}", details={'query': sql_query})

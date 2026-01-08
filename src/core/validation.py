@@ -89,9 +89,35 @@ def _extract_cte_names(sql_query: str) -> Set[str]:
     return cte_names
 
 
+def _extract_subquery_aliases(sql_query: str) -> Set[str]:
+    """
+    Extract subquery aliases from SQL query.
+
+    Subqueries are defined with: FROM (SELECT ...) AS alias_name
+
+    Args:
+        sql_query: SQL query string
+
+    Returns:
+        Set of subquery alias names (lowercase)
+    """
+    import re
+    aliases = set()
+
+    # Pattern: (SELECT ... anything ...) AS alias_name
+    # Match: Parenthesized SELECT followed by AS and identifier
+    # Use non-greedy matching and handle nested parentheses
+    pattern = r'\(SELECT.*?\)\s+AS\s+(\w+)'
+    matches = re.findall(pattern, sql_query, re.IGNORECASE | re.DOTALL)
+    aliases.update(m.lower() for m in matches)
+
+    return aliases
+
+
 def _extract_table_names(parsed_query) -> Set[str]:
     """
     Extract table names from parsed SQL query.
+    Handles FROM clauses, JOIN clauses, and subqueries.
 
     Args:
         parsed_query: sqlparse parsed SQL statement
@@ -100,23 +126,43 @@ def _extract_table_names(parsed_query) -> Set[str]:
         Set of table names (lowercase)
     """
     tables = set()
-    from_seen = False
+    from_or_join_seen = False
 
     for token in parsed_query.tokens:
-        if from_seen:
+        # Check for FROM or JOIN keywords
+        if token.ttype is Keyword and token.value.upper() in ('FROM', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS'):
+            from_or_join_seen = True
+            continue
+
+        # Skip keywords like OUTER, ON
+        if token.ttype is Keyword:
+            if from_or_join_seen and token.value.upper() in ('OUTER', 'ON', 'USING'):
+                from_or_join_seen = False
+            continue
+
+        # Extract table names when we've seen FROM or JOIN
+        if from_or_join_seen:
             if isinstance(token, (IdentifierList, Identifier)):
                 identifiers = token.get_identifiers() if isinstance(token, IdentifierList) else [token]
                 for ident in identifiers:
                     # Get real table name (remove alias if present)
                     if isinstance(ident, Identifier):
+                        # get_real_name() returns the table name without alias
                         table_name = ident.get_real_name()
+                        if table_name:  # Only add if not empty
+                            tables.add(table_name.strip('"').strip('`').lower())
                     else:
-                        table_name = str(ident).split()[0]  # Take first word before alias
-                    tables.add(table_name.strip('"').strip('`').lower())
-                from_seen = False  # Only reset after finding identifier
+                        # Fallback: take first word before alias
+                        table_str = str(ident).strip()
+                        if table_str and not table_str.upper() in ('SELECT', 'WHERE', 'GROUP', 'ORDER', 'HAVING'):
+                            table_name = table_str.split()[0]
+                            tables.add(table_name.strip('"').strip('`').lower())
+                from_or_join_seen = False
 
-        if token.ttype is Keyword and token.value.upper() == 'FROM':
-            from_seen = True
+        # Recursively handle subqueries
+        if hasattr(token, 'tokens'):
+            subtables = _extract_table_names(token)
+            tables.update(subtables)
 
     return tables
 
@@ -180,11 +226,14 @@ def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
         # Extract CTE names (temporary tables defined with WITH clause)
         cte_names = _extract_cte_names(sql_query)
 
+        # Extract subquery aliases (FROM (SELECT ...) AS alias)
+        subquery_aliases = _extract_subquery_aliases(sql_query)
+
         # Extract table names from query
         query_tables = _extract_table_names(parsed)
 
-        # Remove CTE names from validation (they are not schema tables)
-        actual_tables = query_tables - cte_names
+        # Remove CTE names and subquery aliases from validation (they are not schema tables)
+        actual_tables = query_tables - cte_names - subquery_aliases
 
         # Check if all tables are in schema
         invalid_tables = actual_tables - allowed_tables
@@ -194,7 +243,7 @@ def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
                 details={'query': sql_query, 'allowed': list(allowed_tables)}
             )
 
-        logger.info(f"SQL validation passed: {len(actual_tables)} schema tables, {len(cte_names)} CTEs")
+        logger.info(f"SQL validation passed: {len(actual_tables)} schema tables, {len(cte_names)} CTEs, {len(subquery_aliases)} subquery aliases")
         return True
 
     except Exception as e:

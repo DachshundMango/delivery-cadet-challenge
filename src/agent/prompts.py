@@ -118,11 +118,15 @@ def get_sql_generation_prompt(schema_info: str, user_question: str) -> str:
     """
     return f"""You are an expert PostgreSQL query generator. Analyze the question carefully before generating SQL.
 
-**Database Schema:**
+<database_schema>
 {schema_info}
+</database_schema>
 
-**User Question:** {user_question}
+<user_question>
+{user_question}
+</user_question>
 
+<instructions>
 **STEP-BY-STEP APPROACH:**
 Before writing the query, think through:
 1. Which tables from the schema contain the data needed?
@@ -133,22 +137,89 @@ Before writing the query, think through:
 **CRITICAL RULES:**
 
 1. **Use EXACT table names from schema** - Never abbreviate or invent names
-   ✓ CORRECT: FROM "table_name_from_schema"
-   ✗ WRONG: FROM abbreviated_name (no such table)
-   ✗ WRONG: FROM invented_table (no such table)
+   ✓ CORRECT: FROM orders (exact name from schema)
+   ✓ CORRECT: FROM orders o (with alias 'o')
+   ✗ WRONG: FROM ord (no such table - don't abbreviate)
+   ✗ WRONG: FROM order_data (no such table - use exact name)
 
-2. **Keep queries simple** - Use ORDER BY + LIMIT for "top N", not window functions
+2. **Table aliases are ALLOWED and RECOMMENDED** for readability:
+   - You can use short aliases like 'o', 'u', 't' after table names
+   - These aliases are NOT real tables - they're just shorthand for the query
+   ✓ CORRECT: FROM orders o JOIN users u ON o."user_id" = u."id"
+   ✓ CORRECT: WITH ranked AS (SELECT ... FROM orders o) SELECT * FROM ranked WHERE ...
 
 3. **Quote ALL columns** - PostgreSQL is case-sensitive: t."columnName" not t.columnName
 
 4. **Single query only** - No semicolons in middle, NO comments (-- or /* */), no temp tables
 
-5. **Advanced features ONLY when necessary:**
-   - Window Functions: for ranking WITHIN groups (PARTITION BY)
-   - CTEs (WITH clause): ALWAYS use CTE instead of subqueries in FROM clause
-   - Example: WITH ranked AS (SELECT ... RANK() OVER ...) SELECT * FROM ranked WHERE rank = 1
+5. **CRITICAL: Use CTEs, NOT subqueries in FROM clause**
+   ✓ CORRECT: WITH temp AS (SELECT ...) SELECT * FROM temp
+   ✗ WRONG: SELECT * FROM (SELECT ...) AS temp
+   Why: CTEs are more readable, easier to debug, and preferred by PostgreSQL
 
-After thinking through the steps above, return ONLY the SQL query below. NO explanations, NO markdown, NO text before or after the query:
+6. **Query complexity - Choose the right approach based on the question:**
+
+   a) **Simple "top N" globally**: Use ORDER BY + LIMIT
+      Example: "Show top 10 items by total amount"
+      → SELECT "item", SUM("amount") as total
+        FROM orders
+        GROUP BY "item"
+        ORDER BY total DESC LIMIT 10
+
+   b) **Ranking WITHIN groups (per category/region/etc)**: Use window functions with PARTITION BY
+      Example: "Show top item PER REGION"
+      → WITH ranked AS (
+          SELECT "region", "item", SUM("amount") as total,
+                 RANK() OVER (PARTITION BY "region" ORDER BY SUM("amount") DESC) as rank
+          FROM orders o
+          JOIN users u ON o."user_id" = u."id"
+          GROUP BY "region", "item"
+        )
+        SELECT * FROM ranked WHERE rank = 1
+
+   c) **Running totals / Cumulative sums**: Use window functions with ORDER BY (no PARTITION BY)
+      Example: "Calculate running cumulative total per day"
+      → SELECT "date",
+               SUM("amount") as daily_total,
+               SUM(SUM("amount")) OVER (ORDER BY "date" ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as cumulative_total
+        FROM orders
+        GROUP BY "date"
+        ORDER BY "date"
+
+   d) **Multi-step logic**: ALWAYS use CTEs (WITH clause)
+      NEVER use subqueries in FROM clause - always convert to CTE
+      Example: WITH daily_data AS (SELECT ... FROM orders) SELECT * FROM daily_data
+
+7. **IMPORTANT: Honor user requests** - If the user explicitly asks for "window function", "PARTITION BY", or specific SQL features, USE THEM
+</instructions>
+
+<output_format>
+First, write your reasoning inside <reasoning> tags:
+- Which tables you'll use
+- What joins are needed
+- What the query structure will be
+
+Then, provide ONLY the SQL query inside <sql> tags.
+
+Example:
+<reasoning>
+Tables: "users", "orders"
+Joins: users.id = orders.user_id
+Aggregation: SUM by user
+Structure: Simple GROUP BY with ORDER BY LIMIT
+</reasoning>
+
+<sql>
+SELECT u."name", SUM(o."amount") as total
+FROM "users" u
+JOIN "orders" o ON u."id" = o."user_id"
+GROUP BY u."name"
+ORDER BY total DESC
+LIMIT 10
+</sql>
+</output_format>
+
+Now generate your response following the format above:
 """
 
 
@@ -170,38 +241,64 @@ def get_visualization_prompt(user_question: str, sql_result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = sql_result[:200] + "..." if len(sql_result) > 200 else sql_result
 
-    return f"""You are a data visualization specialist. Analyze whether this data would benefit from a chart.
+    return f"""You are a strict visualization classifier. Your DEFAULT answer is "no".
+
+**CRITICAL RULE: DEFAULT = NO**
+Only return "yes" if the user EXPLICITLY requests a visualization using specific keywords.
 
 **Question:** {user_question}
 **Data sample:** {truncated_result}
 
-**Analysis Steps:**
-1. Examine the user's question - do they explicitly request a chart?
-2. Look at the data structure - how many rows and columns?
-3. Identify the data type - is it categorical, numerical, time-series?
-4. Consider if visualization adds value beyond text
+**Decision Logic:**
 
-**Decision Criteria:**
+**Return "yes" ONLY if user question contains EXPLICIT visualization keywords:**
+- "chart", "graph", "plot", "visualize", "visualization", "draw", "create a chart", "make a graph", "show me a chart"
 
-**Return "yes" if:**
-1. User EXPLICITLY asks for: "chart", "visualize", "plot", "graph", "visualization"
-2. Question implies visual comparison would be helpful (e.g., "compare across...", "trends over time", "distribution of...")
-3. Data has multiple categories/time points that benefit from visual representation
+**Return "no" for ALL other cases, including:**
+- Questions about trends, comparisons, distributions WITHOUT explicit chart keywords
+  Example: "What are the sales trends?" → NO (no chart keyword)
+  Example: "Show me top 10 customers" → NO (no chart keyword)
+  Example: "Compare revenue across regions" → NO (no chart keyword)
+- User explicitly says NOT to visualize
+  Example: "Don't make a chart, just show the data" → NO
+  Example: "No visualization needed" → NO
+- Simple data requests (list, show, get, find)
+  Example: "List all products" → NO
+  Example: "Show me the total revenue" → NO
 
-**Return "no" if:**
-1. Simple lookup or count ("how many", "what is the total")
-2. User asks to "list" or "show" without visual intent
-3. Single value answer
-4. Only 1-2 rows of data (insufficient for meaningful chart)
+**Few-Shot Examples:**
 
-**Be conservative:** When in doubt, prefer "no". Only suggest visualization when it clearly adds value.
+Q: "What are the top 10 products by sales?"
+A: {{"visualise": "no"}}
+Reason: No explicit chart keyword
 
-**Chart Type Selection:**
-- Comparison/ranking data (e.g., top 10, by category) → "bar"
-- Time series/trends (e.g., daily, monthly, over time) → "line"
-- Parts of whole/proportions (e.g., percentage breakdown) → "pie"
+Q: "Show me revenue trends over time"
+A: {{"visualise": "no"}}
+Reason: "trends" is not an explicit chart keyword
 
-Return ONLY the JSON below. NO explanations, NO text before or after. Just the JSON object:
+Q: "Create a bar chart of top 10 products"
+A: {{"visualise": "yes", "chart_type": "bar"}}
+Reason: Explicit "chart" keyword + chart type specified
+
+Q: "Visualize the sales by region"
+A: {{"visualise": "yes", "chart_type": "bar"}}
+Reason: Explicit "visualize" keyword
+
+Q: "Don't make a chart, just show the numbers"
+A: {{"visualise": "no"}}
+Reason: Explicit negative instruction
+
+Q: "Compare A and B"
+A: {{"visualise": "no"}}
+Reason: No explicit visualization keyword
+
+**Chart Type Selection (only if visualise="yes"):**
+- Comparison/ranking → "bar"
+- Time series/trends → "line"
+- Proportions/breakdown → "pie"
+
+**OUTPUT FORMAT:**
+Return ONLY valid JSON. NO explanations, NO text before/after:
 {{"visualise": "yes", "chart_type": "bar"}}
 OR
 {{"visualise": "no"}}"""
@@ -414,7 +511,7 @@ Before writing your answer:
 **Response format:**
 - Start each item with a bullet point or number
 - Use natural language: "Category A" not "categoryA"
-- Add spaces: "revenue of $19,983" not "revenue19983"
+- Add spaces: "amount of \$19,983" not "amount19983"
 - Add commas in numbers: "19,983" not "19983"
 - **CRITICAL: Escape ALL dollar signs with backslash: \$100 (NEVER use $100 directly)**
 - This prevents LaTeX rendering issues in the frontend
@@ -422,13 +519,13 @@ Before writing your answer:
 **WRONG examples to AVOID:**
 ❌ "19,983thanaveragetransactionsvalue128.55" - NO SPACES
 ❌ "XXL19983128.55" - VALUES CONCATENATED
-❌ "categoryArevenue19983" - COLUMN NAMES MIXED
-❌ "Total revenue: $19,983" - DOLLAR SIGN NOT ESCAPED (will render as LaTeX)
+❌ "categoryAamount19983" - COLUMN NAMES MIXED
+❌ "Total amount: $19,983" - DOLLAR SIGN NOT ESCAPED (will render as LaTeX)
 
 **CORRECT examples:**
-✓ "Category A has a revenue of \$19,983 with average value of \$128.55"
-✓ "- Category: A\n- Revenue: \$19,983\n- Average: \$128.55"
-✓ "Total sales: \$50,000" - DOLLAR SIGN PROPERLY ESCAPED
+✓ "Category A has an amount of \$19,983 with average value of \$128.55"
+✓ "- Category: A\n- Amount: \$19,983\n- Average: \$128.55"
+✓ "Total amount: \$50,000" - DOLLAR SIGN PROPERLY ESCAPED
 
 **CRITICAL - Privacy Protection (MANDATORY):**
 ⚠️ YOU MUST NEVER SHOW ANY INDIVIDUAL PERSON NAMES IN YOUR RESPONSE ⚠️
@@ -462,14 +559,6 @@ Look for:
 3. **Imbalances**: Uneven distribution across categories (e.g., "One category dominates with 80% share")
 4. **Correlations**: Interesting relationships between fields (e.g., "Field X shows 3x higher values when Field Y is larger")
 
-**Format your response in TWO sections:**
-
-**Answer:**
-[Your direct answer to the question]
-
-💡 **Interesting Insight:**
-[1-2 sentences about a pattern you discovered in the data that the user didn't ask about]
-
 **Rules for insights:**
 - Base insights ONLY on the actual data shown in the results
 - Be specific with numbers and percentages
@@ -477,10 +566,28 @@ Look for:
 - Focus on actionable or surprising patterns
 - If no interesting pattern exists, write "No significant patterns detected"
 
-**Example structure:**
-Answer: The top 3 entries are Person #1 with \$5,000, Person #2 with \$4,200, and Person #3 with \$3,800.
+<output_format>
+Structure your response using XML tags:
 
-💡 **Interesting Insight:** These top 3 entries account for 65% of the total, showing a high concentration pattern."""
+<answer>
+Your direct answer to the question here.
+</answer>
+
+<insight>
+💡 **Interesting Insight:** 1-2 sentences about a pattern you discovered in the data that the user didn't ask about.
+</insight>
+
+Example:
+<answer>
+The top 3 entries are Person #1 with \$5,000, Person #2 with \$4,200, and Person #3 with \$3,800.
+</answer>
+
+<insight>
+💡 **Interesting Insight:** These top 3 entries account for 65% of the total, showing a high concentration pattern.
+</insight>
+</output_format>
+
+Now generate your response following the XML format above:"""
 
 
 # ===============================================================

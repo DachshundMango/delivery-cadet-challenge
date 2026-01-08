@@ -35,7 +35,15 @@ logger = setup_logger('cadet.nodes')
 
 # LLM configuration (can be overridden by environment variable)
 LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.1-8b-instant')
-llm = ChatGroq(model=LLM_MODEL)
+
+# Task-specific LLMs with optimized temperature settings
+llm_intent = ChatGroq(model=LLM_MODEL, temperature=0.0)    # Intent classification: deterministic
+llm_sql = ChatGroq(model=LLM_MODEL, temperature=0.1)       # SQL generation: accurate & safe
+llm_vis = ChatGroq(model=LLM_MODEL, temperature=0.0)       # Visualization: deterministic (strict keyword detection)
+llm_response = ChatGroq(model=LLM_MODEL, temperature=0.7)  # Response: natural & varied
+
+# Default LLM (for backward compatibility)
+llm = llm_sql
 
 # File paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -255,7 +263,7 @@ def intent_classification(state: SQLAgentState) -> dict:
             "user_question": user_question
         })
 
-        response = llm.invoke(final_prompt_value)
+        response = llm_intent.invoke(final_prompt_value)  # Temperature: 0.0 (deterministic)
 
         # Clean markdown formatting (remove **, `, ', etc.)
         intent = response.content.strip().lower()
@@ -282,7 +290,7 @@ def generate_general_response(state: SQLAgentState) -> dict:
     # Get prompt from prompts module
     general_prompt = get_general_response_prompt(user_question)
 
-    response = llm.invoke(general_prompt)
+    response = llm_response.invoke(general_prompt)  # Temperature: 0.7 (natural language)
 
     return {
         "messages": [response]
@@ -365,11 +373,26 @@ def generate_SQL(state: SQLAgentState) -> dict:
 
             logger.info(f"Retry {retry_count}: Added specific hint for error type")
 
-        response = llm.invoke(sql_prompt)
-        sql_query = response.content.strip()
+        response = llm_sql.invoke(sql_prompt)  # Temperature: 0.1 (accurate & safe queries)
+        raw_content = response.content.strip()
 
-        # Clean markdown formatting
-        sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+        # Try XML parsing first (new structured format)
+        import re
+        sql_match = re.search(r'<sql>(.*?)</sql>', raw_content, re.DOTALL | re.IGNORECASE)
+
+        if sql_match:
+            # Extract SQL from XML tags
+            sql_query = sql_match.group(1).strip()
+
+            # Optional: Extract reasoning for logging (not used in validation)
+            reasoning_match = re.search(r'<reasoning>(.*?)</reasoning>', raw_content, re.DOTALL | re.IGNORECASE)
+            if reasoning_match:
+                reasoning = reasoning_match.group(1).strip()
+                logger.debug(f"LLM reasoning: {reasoning[:200]}...")
+        else:
+            # Fallback to legacy parsing (markdown format)
+            sql_query = raw_content.replace("```sql", "").replace("```", "").strip()
+            logger.debug("Using fallback parsing (no XML tags found)")
 
         # CRITICAL: Validate query safety
         validate_sql_query(sql_query, allowed_tables)
@@ -464,7 +487,7 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         # Get prompt from prompts module
         vis_prompt = get_visualization_prompt(user_question, sql_result)
 
-        response = llm.invoke(vis_prompt)
+        response = llm_vis.invoke(vis_prompt)  # Temperature: 0.2 (consistent decisions)
 
         # Clean markdown formatting (similar to SQL generation)
         content = response.content.strip()
@@ -598,7 +621,7 @@ def generate_pyodide_analysis(state: SQLAgentState) -> dict:
     # Get prompt from prompts module
     pyodide_prompt = get_pyodide_analysis_prompt(user_question, sql_result)
 
-    response = llm.invoke(pyodide_prompt)
+    response = llm_sql.invoke(pyodide_prompt)  # Temperature: 0.1 (code generation needs accuracy)
     code = response.content.replace("```python", "").replace("```", "").strip()
     
     tool_message = ToolMessage(
@@ -634,7 +657,30 @@ def generate_response(state: SQLAgentState) -> dict:
     # Get prompt from prompts module
     response_prompt = get_response_generation_prompt(question, result)
 
-    response = llm.invoke(response_prompt)
-    logger.info("Response generated successfully")
+    response = llm_response.invoke(response_prompt)  # Temperature: 0.7 (natural & varied)
+    raw_content = response.content.strip()
 
-    return {"messages": [response]}
+    # Try XML parsing first (new structured format)
+    import re
+    answer_match = re.search(r'<answer>(.*?)</answer>', raw_content, re.DOTALL | re.IGNORECASE)
+    insight_match = re.search(r'<insight>(.*?)</insight>', raw_content, re.DOTALL | re.IGNORECASE)
+
+    if answer_match:
+        # Extract structured response
+        answer_text = answer_match.group(1).strip()
+        insight_text = insight_match.group(1).strip() if insight_match else ""
+
+        # Combine answer and insight
+        if insight_text:
+            final_response = f"{answer_text}\n\n{insight_text}"
+        else:
+            final_response = answer_text
+
+        logger.info("Response generated successfully (XML format)")
+        # Create new message with parsed content
+        from langchain_core.messages import AIMessage
+        return {"messages": [AIMessage(content=final_response)]}
+    else:
+        # Fallback to legacy format (use response as-is)
+        logger.info("Response generated successfully (legacy format)")
+        return {"messages": [response]}

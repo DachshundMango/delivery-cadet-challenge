@@ -1,0 +1,45 @@
+2026-01-07T10:09:43.549019Z [error    ] SQL generation failed: SQL parsing failed: Unknown tables in query: {'it'} [cadet.nodes] api_variant=local_dev assistant_id=fe096781-5601-53d2-b2f6-0d3403f7e9ca graph_id=agent langgraph_api_version=0.6.15 langgraph_node=generate_SQL message="SQL generation failed: SQL parsing failed: Unknown tables in query: {'it'}" request_id=15904de8-361a-4612-981c-9471d3c15e66 run_attempt=1 run_id=019b97ee-bc00-78f3-bf86-4fceb250916e thread_id=de0e83de-444d-47cb-a267-364108e764bc thread_name=asyncio_1
+2026-01-07T10:09:43.943056Z [error    ] Run encountered an error in graph: <class 'src.core.errors.SQLGenerationError'>(SQL parsing failed: Unknown tables in query: {'it'}) [langgraph_api.worker] api_variant=local_dev assistant_id=fe096781-5601-53d2-b2f6-0d3403f7e9ca graph_id=agent langgraph_api_version=0.6.15 request_id=15904de8-361a-4612-981c-9471d3c15e66 run_attempt=1 run_id=019b97ee-bc00-78f3-bf86-4fceb250916e thread_id=de0e83de-444d-47cb-a267-364108e764bc thread_name=MainThread
+Traceback (most recent call last):
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph_api/worker.py", line 162, in wrap_user_errors
+    await consume(
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph_api/stream.py", line 504, in consume
+    raise e
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph_api/stream.py", line 487, in consume
+    async for mode, payload in stream:
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph_api/stream.py", line 374, in astream_state
+    event = await wait_if_not_done(anext(stream, sentinel), done)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph_api/asyncio.py", line 89, in wait_if_not_done
+    raise e.exceptions[0] from None
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph/pregel/main.py", line 2971, in astream
+    async for _ in runner.atick(
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph/pregel/_runner.py", line 410, in atick
+    _panic_or_proceed(
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph/pregel/_runner.py", line 520, in _panic_or_proceed
+    raise exc
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph/pregel/_retry.py", line 137, in arun_with_retry
+    return await task.proc.ainvoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 705, in ainvoke
+    input = await asyncio.create_task(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 473, in ainvoke
+    ret = await self.afunc(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langchain_core/runnables/config.py", line 608, in run_in_executor
+    return await asyncio.get_running_loop().run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/miniforge3/envs/cadet/lib/python3.12/site-packages/langchain_core/runnables/config.py", line 599, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/chanwoobae/Desktop/cadet/src/agent/nodes.py", line 398, in generate_SQL
+    validate_sql_query(sql_query, allowed_tables)
+  File "/Users/chanwoobae/Desktop/cadet/src/core/validation.py", line 250, in validate_sql_query
+    raise SQLGenerationError(f"SQL parsing failed: {e}", details={'query': sql_query})
+src.core.errors.SQLGenerationError: SQL parsing failed: Unknown tables in query: {'it'}
+During task with name 'generate_SQL' and id 'cb3e8c2a-1a40-8292-2444-411ccf2a73ff'
+2026-01-07T10:09:43.945159Z [error    ] Background run failed. Exception: <class 'src.core.errors.SQLGenerationError'>(SQL parsing failed: Unknown tables in query: {'it'}) [langgraph_api.worker] api_variant=local_dev assistant_id=fe096781-5601-53d2-b2f6-0d3403f7e9ca graph_id=agent langgraph_api_version=0.6.15 request_id=15904de8-361a-4612-981c-9471d3c15e66 run_attempt=1 run_completed_in_ms=19978 run_created_at=2026-01-07T10:09:23.970654+00:00 run_ended_at=2026-01-07T10:09:43.944906+00:00 run_exec_ms=19177 run_id=019b97ee-bc00-78f3-bf86-4fceb250916e run_started_at=2026-01-07T10:09:24.767831+00:00 run_wait_time_ms=797 thread_id=de0e83de-444d-47cb-a267-364108e764bc thread_name=asyncio_1

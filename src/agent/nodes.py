@@ -22,7 +22,7 @@ from src.core.errors import (
     LLMError
 )
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
 from sqlalchemy import create_engine, text, Engine
@@ -33,14 +33,16 @@ import plotly.express as px
 load_dotenv()
 logger = setup_logger('cadet.nodes')
 
-# LLM configuration (can be overridden by environment variable)
-LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.1-8b-instant')
+# LLM configuration
+LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.3-70b')
+CEREBRAS_API_KEY = os.getenv('CEREBRAS_API_KEY')
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 
-# Task-specific LLMs with optimized temperature settings
-llm_intent = ChatGroq(model=LLM_MODEL, temperature=0.0)    # Intent classification: deterministic
-llm_sql = ChatGroq(model=LLM_MODEL, temperature=0.1)       # SQL generation: accurate & safe
-llm_vis = ChatGroq(model=LLM_MODEL, temperature=0.0)       # Visualization: deterministic (strict keyword detection)
-llm_response = ChatGroq(model=LLM_MODEL, temperature=0.7)  # Response: natural & varied
+# Task-specific LLMs with optimized temperature settings (using Cerebras via OpenAI-compatible API)
+llm_intent = ChatOpenAI(model=LLM_MODEL, temperature=0.0, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)    # Intent classification: deterministic
+llm_sql = ChatOpenAI(model=LLM_MODEL, temperature=0.1, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)       # SQL generation: accurate & safe
+llm_vis = ChatOpenAI(model=LLM_MODEL, temperature=0.0, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)       # Visualization: deterministic (strict keyword detection)
+llm_response = ChatOpenAI(model=LLM_MODEL, temperature=0.7, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)  # Response: natural & varied
 
 # Default LLM (for backward compatibility)
 llm = llm_sql
@@ -501,7 +503,7 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
             chart_type = 'bar'
 
         # sql_result is already PII-masked by execute_SQL node
-        plotly_data = create_plotly_chart(sql_result, chart_type)
+        plotly_data = create_plotly_chart(sql_result, chart_type, user_question)
 
         if plotly_data is None:
             return {"plotly_data": None}
@@ -519,8 +521,8 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         logger.warning("Failed to parse LLM response as JSON")
         return {"plotly_data": None}
 
-def create_plotly_chart(sql_result, chart_type):
-    """Generate Plotly chart JSON from SQL results"""
+def create_plotly_chart(sql_result, chart_type, user_question=""):
+    """Generate Plotly chart JSON from SQL results with proper titles and labels"""
     try:
         sql_list = json.loads(sql_result)
     except json.JSONDecodeError:
@@ -529,15 +531,57 @@ def create_plotly_chart(sql_result, chart_type):
         except (ValueError, SyntaxError) as e:
             logger.warning(f"Failed to parse SQL result for charting: {e}")
             return None
-    
+
     if not sql_list:
         return None
-    
+
+    # Extract column names from first row
+    first_row = sql_list[0]
+    if isinstance(first_row, dict):
+        columns = list(first_row.keys())
+    else:
+        columns = []
+
+    # Determine axis labels from column names
+    x_label = columns[0] if len(columns) >= 1 else "Category"
+    y_label = columns[-1] if len(columns) >= 1 else "Value"
+
+    # Generate chart title from user question
+    if user_question:
+        # Clean up common phrases
+        title = user_question.replace("show me", "").replace("Show me", "")
+        title = title.replace("create a chart", "").replace("Create a chart", "")
+        title = title.replace("create a bar chart", "").replace("Create a bar chart", "")
+        title = title.replace("visualize", "").replace("Visualize", "")
+        title = title.replace("make a graph", "").replace("Make a graph", "")
+        title = title.strip()
+
+        # Take only first sentence (up to . or ?)
+        if '.' in title:
+            title = title.split('.')[0]
+        if '?' in title:
+            title = title.split('?')[0]
+
+        # Remove "showing" or "of" at the start
+        if title.lower().startswith("showing "):
+            title = title[8:]
+        if title.lower().startswith("of "):
+            title = title[3:]
+
+        # Limit length to prevent overflow
+        if len(title) > 60:
+            title = title[:57] + "..."
+
+        # Capitalize first letter
+        if title:
+            title = title[0].upper() + title[1:]
+    else:
+        title = f"{y_label} by {x_label}"
+
     x_data = []
     y_data = []
-    
-    for data in sql_list:
 
+    for data in sql_list:
         if isinstance(data, dict):
             row_values = list(data.values())
         elif isinstance(data, (list, tuple)):
@@ -548,25 +592,54 @@ def create_plotly_chart(sql_result, chart_type):
         x_string_parts = [str(x) for x in row_values[:-1]]
 
         if x_string_parts:
-            x_label = ' '.join(x_string_parts)
+            x_value = ' '.join(x_string_parts)
         else:
-            x_label = str(row_values[0])
-        
-        y_label = row_values[-1]
+            x_value = str(row_values[0])
 
-        x_data.append(x_label)
-        y_data.append(y_label)
+        y_value = row_values[-1]
 
-    # Chart generation
+        x_data.append(x_value)
+        y_data.append(y_value)
+
+    # Chart generation with layout customization
     if chart_type == "bar":
-        fig = px.bar(x=x_data, y=y_data, text=y_data, color=x_data)
+        fig = px.bar(x=x_data, y=y_data, text=y_data)
+        fig.update_layout(
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            showlegend=False
+        )
+        fig.update_traces(textposition='outside')
     elif chart_type == "line":
         fig = px.line(x=x_data, y=y_data, markers=True)
+        fig.update_layout(
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            showlegend=False
+        )
     elif chart_type == "pie":
         fig = px.pie(names=x_data, values=y_data, hole=0.3)
+        fig.update_traces(textposition='inside', textinfo='percent+label')
     else:
         # Fallback to bar chart for unknown types
         fig = px.bar(x=x_data, y=y_data)
+        fig.update_layout(
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            showlegend=False
+        )
+
+    # Apply common layout settings to all chart types
+    fig.update_layout(
+        title={
+            'text': title,
+            'x': 0.5,
+            'xanchor': 'center'
+        },
+        font=dict(size=12),
+        height=500,
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
 
     return json.dumps({
         "type": "plotly",

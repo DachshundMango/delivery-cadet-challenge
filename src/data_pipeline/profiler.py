@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from src.core.console import Console
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
@@ -15,8 +15,11 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 
-# LLM configuration (uses LLM_MODEL from .env)
-llm = ChatGroq(model=os.getenv('LLM_MODEL'))
+# LLM configuration (Cerebras via OpenAI-compatible API)
+LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.3-70b')
+CEREBRAS_API_KEY = os.getenv('CEREBRAS_API_KEY')
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+llm = ChatOpenAI(model=LLM_MODEL, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)
 
 
 def analyse_csv_file(file_path) -> dict:

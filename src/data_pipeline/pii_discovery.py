@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from src.core.logger import setup_logger
 from src.core.console import Console
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from src.agent.prompts import get_pii_detection_prompt
 
@@ -20,9 +20,11 @@ CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 load_dotenv()
 logger = setup_logger('cadet.pii_discovery')
 
-# LLM configuration (can be overridden by environment variable)
-LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.1-8b-instant')
-llm = ChatGroq(model=LLM_MODEL)
+# LLM configuration (Cerebras via OpenAI-compatible API)
+LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.3-70b')
+CEREBRAS_API_KEY = os.getenv('CEREBRAS_API_KEY')
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+llm = ChatOpenAI(model=LLM_MODEL, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)
 
 
 def load_data_profile(file_path) -> dict:

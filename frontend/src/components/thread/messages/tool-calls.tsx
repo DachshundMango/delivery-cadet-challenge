@@ -1,5 +1,5 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp } from "lucide-react";
 // chart components import
@@ -72,28 +72,34 @@ export function ToolCalls({
 export function ToolResult({ message }: { message: ToolMessage }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  let parsedContent: any;
-  let isJsonContent = false;
+  // [최적화] 메시지 내용 파싱 결과를 메모이제이션하여 불필요한 객체 생성 방지
+  const { parsedContent, isJsonContent, isPlotly } = useMemo(() => {
+    let parsed: any;
+    let isJson = false;
 
-  try {
-    if (typeof message.content === "string") {
-      parsedContent = JSON.parse(message.content);
-      isJsonContent = isComplexValue(parsedContent);
+    try {
+      if (typeof message.content === "string") {
+        parsed = JSON.parse(message.content);
+        isJson = isComplexValue(parsed);
+      }
+    } catch {
+      parsed = message.content;
     }
-  } catch {
-    // Content is not JSON, use as is
-    parsedContent = message.content;
-  }
+
+    const isPlotlyChart =
+      isJson &&
+      !Array.isArray(parsed) &&
+      parsed?.type === "plotly" &&
+      Array.isArray(parsed?.data);
+
+    return {
+      parsedContent: parsed,
+      isJsonContent: isJson,
+      isPlotly: isPlotlyChart,
+    };
+  }, [message.content]);
 
   const isPython = message.name === "python_interpreter";
-  
-  // check if the content is a plotly chart
-  // condition: 1. is json content, 2. not an array, 3. type is plotly, 4. data is an array
-  const isPlotly = 
-    isJsonContent &&
-    !Array.isArray(parsedContent) &&
-    parsedContent?.type === "plotly" &&
-    Array.isArray(parsedContent?.data);
 
   const contentStr = isJsonContent
     ? JSON.stringify(parsedContent, null, 2)
@@ -132,87 +138,90 @@ export function ToolResult({ message }: { message: ToolMessage }) {
             </div>
           </div>
         )}
-        <motion.div
-          className="min-w-full bg-gray-100"
-          initial={false}
-          animate={{ height: "auto" }}
-          transition={{ duration: 0.3 }}
-        >
-          <div className="p-3">
-            <AnimatePresence
-              mode="wait"
-              initial={false}
-            >
-              <motion.div
-                key={isExpanded ? "expanded" : "collapsed"}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.2 }}
-              >
-                {/* [변경점 3] 렌더링 분기: Plotly 차트 우선 표시 */}
-                {isPython ? (
-                  <PythonRunner code={message.content as string} />
-                ) : isPlotly ? (
-                  <div className="w-full">
-                    <PlotlyChart 
-                      data={parsedContent.data} 
-                      layout={parsedContent.layout} 
-                    />
-                  </div>
-                ) : isJsonContent ? (
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <tbody className="divide-y divide-gray-200">
-                      {(Array.isArray(parsedContent)
-                        ? isExpanded
-                          ? parsedContent
-                          : parsedContent.slice(0, 5)
-                        : Object.entries(parsedContent)
-                      ).map((item, argIdx) => {
-                        const [key, value] = Array.isArray(parsedContent)
-                          ? [argIdx, item]
-                          : [item[0], item[1]];
-                        return (
-                          <tr key={argIdx}>
-                            <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
-                              {key}
-                            </td>
-                            <td className="px-4 py-2 text-sm text-gray-500">
-                              {isComplexValue(value) ? (
-                                <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm break-all">
-                                  {JSON.stringify(value, null, 2)}
-                                </code>
-                              ) : (
-                                String(value)
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                ) : (
-                  <code className="block text-sm">{displayedContent}</code>
-                )}
-              </motion.div>
-            </AnimatePresence>
+
+        {/* Plotly 차트는 애니메이션 컨테이너 밖으로 완전히 분리하여 리사이징 간섭 차단 */}
+        {isPlotly ? (
+          <div className="w-full bg-gray-100 p-3">
+            <PlotlyChart
+              data={parsedContent.data}
+              layout={parsedContent.layout}
+            />
           </div>
-          {/* JSON이 아니고 내용이 길거나, JSON 배열이 5개 초과일 때만 확장 버튼 표시 (Plotly일 때는 숨김) */}
-          {!isPlotly && ((shouldTruncate && !isJsonContent) ||
-            (isJsonContent &&
-              Array.isArray(parsedContent) &&
-              parsedContent.length > 5)) && (
-            <motion.button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
-              initial={{ scale: 1 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {isExpanded ? <ChevronUp /> : <ChevronDown />}
-            </motion.button>
-          )}
-        </motion.div>
+        ) : (
+          <motion.div
+            className="min-w-full bg-gray-100"
+            initial={false}
+            animate={{ height: "auto" }}
+            transition={{ duration: 0.3 }}
+          >
+            <div className="p-3">
+              <AnimatePresence
+                mode="wait"
+                initial={false}
+              >
+                <motion.div
+                  key={isExpanded ? "expanded" : "collapsed"}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {isPython ? (
+                    <PythonRunner code={message.content as string} />
+                  ) : isJsonContent ? (
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <tbody className="divide-y divide-gray-200">
+                        {(Array.isArray(parsedContent)
+                          ? isExpanded
+                            ? parsedContent
+                            : parsedContent.slice(0, 5)
+                          : Object.entries(parsedContent)
+                        ).map((item, argIdx) => {
+                          const [key, value] = Array.isArray(parsedContent)
+                            ? [argIdx, item]
+                            : [item[0], item[1]];
+                          return (
+                            <tr key={argIdx}>
+                              <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
+                                {key}
+                              </td>
+                              <td className="px-4 py-2 text-sm text-gray-500">
+                                {isComplexValue(value) ? (
+                                  <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm break-all">
+                                    {JSON.stringify(value, null, 2)}
+                                  </code>
+                                ) : (
+                                  String(value)
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <code className="block text-sm">{displayedContent}</code>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+            {/* JSON이 아니고 내용이 길거나, JSON 배열이 5개 초과일 때만 확장 버튼 표시 */}
+            {((shouldTruncate && !isJsonContent) ||
+              (isJsonContent &&
+                Array.isArray(parsedContent) &&
+                parsedContent.length > 5)) && (
+              <motion.button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
+                initial={{ scale: 1 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {isExpanded ? <ChevronUp /> : <ChevronDown />}
+              </motion.button>
+            )}
+          </motion.div>
+        )}
       </div>
     </div>
   );

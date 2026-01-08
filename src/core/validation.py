@@ -63,29 +63,32 @@ def validate_user_input(user_input: str, field_name: str = "input") -> str:
 def _extract_cte_names(sql_query: str) -> Set[str]:
     """
     Extract CTE (Common Table Expression) names from SQL query.
-
+    
     CTEs are defined with: WITH cte_name AS (...)
-
+    
     Args:
         sql_query: SQL query string
-
+        
     Returns:
         Set of CTE names (lowercase)
     """
     import re
     cte_names = set()
-
-    # Pattern: WITH name AS or WITH name1 AS (...), name2 AS (...)
-    # Match: WITH followed by identifier before AS
-    pattern = r'\bWITH\s+(\w+)\s+AS\b'
-    matches = re.findall(pattern, sql_query, re.IGNORECASE)
+    
+    # Remove comments to avoid false positives
+    sql_clean = re.sub(r'--.*', '', sql_query)
+    sql_clean = re.sub(r'/\*.*?\*/', '', sql_clean, flags=re.DOTALL)
+    
+    # Find CTE definitions directly
+    # Pattern: identifier AS (
+    # This captures "name" in "WITH name AS (" or ", name AS ("
+    # It is robust because "AS (" is distinctive for CTEs and some function calls
+    # Even if it matches function aliases like "generate_series(...) AS x(id)", 
+    # treating 'x' as a CTE/temporary name is actually correct for validation purposes.
+    cte_pattern = r'\b(\w+)\s+AS\s*\('
+    matches = re.findall(cte_pattern, sql_clean, re.IGNORECASE)
     cte_names.update(m.lower() for m in matches)
-
-    # Also match subsequent CTEs after commas: , name AS
-    pattern = r',\s*(\w+)\s+AS\b'
-    matches = re.findall(pattern, sql_query, re.IGNORECASE)
-    cte_names.update(m.lower() for m in matches)
-
+        
     return cte_names
 
 
@@ -233,7 +236,25 @@ def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
         query_tables = _extract_table_names(parsed)
 
         # Remove CTE names and subquery aliases from validation (they are not schema tables)
-        actual_tables = query_tables - cte_names - subquery_aliases
+        # Handle fuzzy matching for CTEs (e.g. LLM generated "name_cte" but used "name")
+        actual_tables = set()
+        for table in query_tables:
+            # Check if it's a known CTE or subquery alias
+            if table in cte_names or table in subquery_aliases:
+                continue
+            
+            # Fuzzy check: if table is a prefix of any CTE name (e.g. "supplier" in "supplier_cte")
+            # or if any CTE name is a prefix of table (e.g. "supplier_cte" in "supplier_cte_1")
+            is_cte_variant = False
+            for cte in cte_names:
+                if table in cte or cte in table:
+                    is_cte_variant = True
+                    break
+            
+            if is_cte_variant:
+                continue
+                
+            actual_tables.add(table)
 
         # Check if all tables are in schema
         invalid_tables = actual_tables - allowed_tables

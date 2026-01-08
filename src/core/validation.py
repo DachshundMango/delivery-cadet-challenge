@@ -94,26 +94,55 @@ def _extract_cte_names(sql_query: str) -> Set[str]:
 
 def _extract_subquery_aliases(sql_query: str) -> Set[str]:
     """
-    Extract subquery aliases from SQL query.
-
-    Subqueries are defined with: FROM (SELECT ...) AS alias_name
-
+    Extract subquery aliases from SQL query using sqlparse.
+    
+    This function traverses the parsed SQL tree to find identifiers that act as aliases
+    for subqueries. It handles complex nested queries better than regex.
+    
+    Example:
+        SELECT * FROM (SELECT ...) AS my_alias
+        -> Returns {'my_alias'}
+    
     Args:
         sql_query: SQL query string
-
+        
     Returns:
         Set of subquery alias names (lowercase)
     """
-    import re
+    import sqlparse
+    from sqlparse.sql import Identifier, IdentifierList, Parenthesis
+    from sqlparse.tokens import Keyword, DML
+    
     aliases = set()
+    
+    try:
+        parsed = sqlparse.parse(sql_query)[0]
+    except:
+        return aliases
 
-    # Pattern: (SELECT ... anything ...) AS alias_name
-    # Match: Parenthesized SELECT followed by AS and identifier
-    # Use non-greedy matching and handle nested parentheses
-    pattern = r'\(SELECT.*?\)\s+AS\s+(\w+)'
-    matches = re.findall(pattern, sql_query, re.IGNORECASE | re.DOTALL)
-    aliases.update(m.lower() for m in matches)
+    def _extract_from_token(token):
+        # If token is an identifier (e.g., "(SELECT ...) AS alias")
+        if isinstance(token, Identifier):
+            # Check if it has an alias
+            if token.has_alias():
+                # Check if the real name is a subquery (starts with parenthesis)
+                # This is a heuristic because sqlparse doesn't always strictly type subqueries
+                real_name = token.get_real_name()
+                # If real_name is None, it might be a subquery structure
+                if real_name is None or real_name.strip().startswith('('):
+                    aliases.add(token.get_alias().lower())
+        
+        # If token is a list of identifiers (e.g. "table1, table2")
+        elif isinstance(token, IdentifierList):
+            for identifier in token.get_identifiers():
+                _extract_from_token(identifier)
+        
+        # Recursively check children to find nested subqueries
+        if hasattr(token, 'tokens'):
+            for child in token.tokens:
+                _extract_from_token(child)
 
+    _extract_from_token(parsed)
     return aliases
 
 
@@ -121,10 +150,12 @@ def _extract_table_names(parsed_query) -> Set[str]:
     """
     Extract table names from parsed SQL query.
     Handles FROM clauses, JOIN clauses, and subqueries.
-
+    
+    It scans the token stream for FROM/JOIN keywords and captures the following identifiers.
+    
     Args:
         parsed_query: sqlparse parsed SQL statement
-
+    
     Returns:
         Set of table names (lowercase)
     """

@@ -1,3 +1,19 @@
+"""
+LangGraph Agent Nodes
+
+This module defines the core logic nodes for the SQL Agent workflow.
+Each function represents a node in the LangGraph state machine, processing
+the state and returning updates.
+
+Key Components:
+- Intent Classification: Routes between SQL generation and general conversation
+- SQL Generation: Converts natural language to PostgreSQL queries (with retries)
+- Execution: Runs queries against the database
+- Visualization: Determines if and how to chart the results
+- Analysis: Optional Python-based statistical analysis using Pyodide
+- Response Generation: Formats final answers in natural language
+"""
+
 import ast
 import os
 import json
@@ -62,7 +78,15 @@ VALID_CHART_TYPES = {'bar', 'line', 'pie'}
 
 
 def get_cached_engine() -> Engine:
-    """Get or create cached database engine"""
+    """
+    Get or create cached database engine.
+    
+    Uses a module-level global variable `_DB_ENGINE` to store the connection pool,
+    preventing overhead from recreating engines on every request.
+    
+    Returns:
+        sqlalchemy.Engine: Active database engine instance
+    """
     global _DB_ENGINE
     if _DB_ENGINE is None:
         _DB_ENGINE = get_db_engine()
@@ -72,10 +96,13 @@ def get_cached_engine() -> Engine:
 def load_schema_info() -> str:
     """
     Load pre-generated schema info from schema_info.json with caching.
-
+    
+    The schema information is critical for the LLM to generate valid SQL.
+    It includes table names, column names, types, and foreign key relationships.
+    
     Returns:
-        LLM-ready schema description string
-
+        str: LLM-ready schema description string
+    
     Raises:
         SchemaLoadError: If schema file not found or invalid
     """
@@ -329,7 +356,7 @@ def generate_SQL(state: SQLAgentState) -> dict:
         # Load schema (cached after first call)
         schema_info = load_schema_info()
 
-        # Load allowed tables for validation
+        # Load allowed tables for validation to prevent hallucinations
         with open(SCHEMA_JSON_PATH, 'r') as f:
             schema_data = json.load(f)
         allowed_tables = set(schema_data['tables'].keys())
@@ -337,15 +364,15 @@ def generate_SQL(state: SQLAgentState) -> dict:
         # Get base prompt from prompts module
         sql_prompt = get_sql_generation_prompt(schema_info, user_question)
 
-        # Check if this is a retry (look for previous errors)
+        # Check if this is a retry (look for previous errors in message history)
         messages = state.get('messages', [])
         retry_count = sum(1 for msg in messages if 'Error:' in str(getattr(msg, 'content', '')))
 
         if retry_count > 0:
-            # Get previous error from query_result
+            # Get previous error from query_result to generate targeted hints
             previous_error = state.get('query_result', '')
 
-            # Add specific hints based on error type
+            # Add specific hints based on error type to guide the LLM's correction
             if 'Unknown tables in query' in previous_error:
                 # Extract invalid table names from error
                 import re
@@ -468,7 +495,19 @@ def execute_SQL(state: SQLAgentState) -> dict:
         return {"query_result": error_msg}
 
 def visualisation_request_classification(state: SQLAgentState) -> dict:
-    """Determine if chart is needed and select type"""
+    """
+    Determine if a chart is needed and select the appropriate type.
+    
+    Analyzes the user's question and the SQL results to decide if visualization
+    adds value. If yes, it generates the Plotly JSON configuration.
+    
+    Args:
+        state: Current workflow state (requires query_result, intent)
+        
+    Returns:
+        dict: Updates to state with 'plotly_data' (JSON string or None) 
+              and optional ToolMessage.
+    """
     user_question = state.get('user_question', '')
     sql_result = state.get('query_result', '')
     intent = state.get('intent', '')

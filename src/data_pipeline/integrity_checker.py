@@ -1,3 +1,16 @@
+"""
+Integrity Checker
+
+This module validates the referential integrity and data quality of CSV files
+before they are loaded into the database. It uses the configuration from
+keys.json to check for Primary Key (PK) and Foreign Key (FK) violations.
+
+Key Checks:
+- Primary Key: Duplicates, NULL values
+- Foreign Key: Orphaned records (FK values not found in referenced PK column)
+- Systematic Issues: Detects if a large portion (>90%) of FKs are missing (e.g., ID offset)
+"""
+
 import os
 import glob
 import json
@@ -36,12 +49,17 @@ def load_csv_data(data_dir) -> dict:
 
 def detect_pk_issues(tables, keys_config) -> list:
     """
-    Detect PK issues (duplicates, NULLs)
-
-    Returns: list of issues
+    Detect Primary Key issues (duplicates, NULLs).
+    
+    Args:
+        tables (dict): Dictionary of pandas DataFrames {table_name: df}
+        keys_config (dict): PK/FK configuration from keys.json
+        
+    Returns:
+        list: List of issue dictionaries containing table, column, counts, and samples
     """
     issues = []
-
+    
     for table_name, keys in keys_config.items():
         pk = keys.get('pk')
 
@@ -90,8 +108,20 @@ def detect_pk_issues(tables, keys_config) -> list:
 
     return issues
 
-def detect_fk_issues(tables, keys_config) -> list:
 
+def detect_fk_issues(tables, keys_config) -> list:
+    """
+    Detect Foreign Key issues (orphaned records).
+    
+    Checks if values in a FK column exist in the referenced PK column.
+    
+    Args:
+        tables (dict): Dictionary of pandas DataFrames
+        keys_config (dict): PK/FK configuration
+        
+    Returns:
+        list: List of issue dictionaries with missing count, ratio, and hints
+    """
     issues = []
 
     for table_name, keys in keys_config.items():
@@ -111,7 +141,7 @@ def detect_fk_issues(tables, keys_config) -> list:
 
             pd_ref = tables[ref_table]
             
-            # 차집합
+            # Use set operations for fast checking
             fk_values = set(pd_fk[fk_col].dropna())
             pk_values = set(pd_ref[ref_col].dropna())
             missing = fk_values - pk_values
@@ -121,7 +151,7 @@ def detect_fk_issues(tables, keys_config) -> list:
                 missing_count = len(missing)
                 missing_ratio = missing_count / total_fk
                 
-                # 힌트 생성
+                # Heuristic for systematic errors (e.g. ID offset)
                 if missing_ratio > 0.9:
                     hint = "Systematic offset suspected (90%+ affected)"
                 else:
@@ -134,13 +164,17 @@ def detect_fk_issues(tables, keys_config) -> list:
                     "ref_column": ref_col,
                     "missing_count": missing_count,
                     "missing_ratio": missing_ratio,
-                    "missing_samples": sorted(list(missing))[:10],  # 샘플
+                    "missing_samples": sorted(list(missing))[:10],  # Show samples
                     "hint": hint
                 })
     
     return issues
 
+
 def print_report(pk_issues, fk_issues):
+    """
+    Print a formatted report of all integrity issues found.
+    """
 
     total_issues = len(pk_issues) + len(fk_issues)
 

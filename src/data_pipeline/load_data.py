@@ -18,10 +18,21 @@ SRC_DIR = os.path.join(BASE_DIR, 'src')
 CONFIG_DIR = os.path.join(SRC_DIR, 'config')
 
 def load_csv_to_db(file_path: str, table_name: str, engine: Engine) -> None:
-
+    """
+    Load a single CSV file into the PostgreSQL database.
+    
+    Handles BOM (Byte Order Mark) automatically using 'utf-8-sig' encoding.
+    Replaces existing tables if they already exist.
+    
+    Args:
+        file_path: Absolute path to the CSV file
+        table_name: Name of the target database table
+        engine: SQLAlchemy Engine instance
+    """
     try:
         Console.info(f"Loading {table_name}...")
-        # Use utf-8-sig to handle potential BOM in CSV files
+        # Use utf-8-sig to handle potential BOM in CSV files (e.g. from Excel)
+        # This prevents column names from having hidden characters like \ufeff
         df = pd.read_csv(file_path, encoding='utf-8-sig')
         df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
         Console.info(f"{table_name}: {len(df)} rows loaded")

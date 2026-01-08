@@ -1,3 +1,17 @@
+"""
+Relationship Discovery
+
+This interactive tool assists users in defining Primary Keys (PK) and Foreign Keys (FK)
+for the dataset. It analyzes column names and statistics to suggest likely relationships,
+which are then confirmed by the user and saved to `keys.json`.
+
+Workflow:
+1. Load data profile (from profiler.py)
+2. Interactive PK selection: Suggests PKs based on uniqueness and patterns
+3. Interactive FK matching: Suggests FKs based on column name similarity
+4. Save configuration: Generates keys.json for use by load_data.py
+"""
+
 import os
 import json
 import pandas as pd

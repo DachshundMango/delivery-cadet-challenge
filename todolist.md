@@ -2,11 +2,12 @@
 
 ## High Priority
 
-- [ ] 바 차트만 생성되는 문제 해결 (line/pie 차트 선택 로직 개선)
-- [ ] pyodide 확인
+- [ ] pyodide 테스트
+- [ ] 다른 타입 차트 테스트 -> 질문 추가 (line/pie 차트 선택 로직)
 
 ## Future Improvements
 
+- [ ] 토큰량 개선
 - [ ] 데이터 파이프라인 자동화 개선 (취소/롤백 기능)
 - [ ] Data-agnostic 원칙 위반 사항 전체 점검 (prompts.py 예시 일반화)
 

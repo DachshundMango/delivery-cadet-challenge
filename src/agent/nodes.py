@@ -28,6 +28,13 @@ from src.agent.prompts import (
     get_pyodide_analysis_prompt,
     get_response_generation_prompt,
 )
+from src.agent.feedbacks import (
+    get_unknown_tables_feedback,
+    get_multiple_statements_feedback,
+    get_sql_comments_feedback,
+    get_forbidden_keyword_feedback,
+    get_column_not_found_feedback,
+)
 from src.core.logger import setup_logger
 from src.core.db import get_db_engine
 from src.core.validation import validate_sql_query
@@ -37,7 +44,7 @@ from src.core.errors import (
     SchemaLoadError,
     LLMError
 )
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
@@ -369,38 +376,40 @@ def generate_SQL(state: SQLAgentState) -> dict:
         retry_count = sum(1 for msg in messages if 'Error:' in str(getattr(msg, 'content', '')))
 
         if retry_count > 0:
-            # Get previous error from query_result to generate targeted hints
+            # Get previous error from query_result to generate targeted feedbacks
             previous_error = state.get('query_result', '')
 
-            # Add specific hints based on error type to guide the LLM's correction
+            # Add specific feedbacks based on error type to guide the LLM's correction
             if 'Unknown tables in query' in previous_error:
                 # Extract invalid table names from error
                 import re
                 match = re.search(r"Unknown tables in query: (\{.*?\})", previous_error)
                 if match:
-                    invalid_tables = match.group(1)
+                    invalid_tables_str = match.group(1)
                     # Check if it's a subquery alias issue (single letter or short name)
-                    invalid_list = eval(invalid_tables)  # Convert string set to actual set
-                    is_likely_alias = any(len(t) <= 2 for t in invalid_list)
+                    invalid_tables_set = eval(invalid_tables_str)  # Convert string set to actual set
+                    is_likely_alias = any(len(t) <= 2 for t in invalid_tables_set)
 
-                    if is_likely_alias:
-                        sql_prompt += f"\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt used a subquery with alias {invalid_tables}, which caused a validation error.\nALWAYS use CTE (WITH clause) instead of subqueries in FROM clause.\nExample: WITH ranked AS (SELECT ... RANK() OVER (PARTITION BY ... ORDER BY ...) AS rank FROM ...) SELECT * FROM ranked WHERE rank = 1"
-                    else:
-                        sql_prompt += f"\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt used invalid table(s): {invalid_tables}\nThese tables DO NOT EXIST in the schema.\nUse ONLY these exact table names: {', '.join(sorted(allowed_tables))}\nDo NOT abbreviate or invent table names."
+                    # Use feedback module
+                    sql_prompt += get_unknown_tables_feedback(
+                        invalid_tables=invalid_tables_set,
+                        allowed_tables=allowed_tables,
+                        is_likely_alias=is_likely_alias
+                    )
 
             elif 'Multiple SQL statements not allowed' in previous_error:
-                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt had multiple SQL statements (separated by semicolons).\nGenerate EXACTLY ONE query. Use CTE (WITH clause) for multi-step logic:\nWITH temp AS (SELECT ...) SELECT ... FROM temp"
+                sql_prompt += get_multiple_statements_feedback()
 
             elif 'SQL comments not allowed' in previous_error:
-                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt had SQL comments (-- or /* */).\nRemove ALL comments. Return ONLY the SQL query with no explanations."
+                sql_prompt += get_sql_comments_feedback()
 
             elif 'Forbidden SQL keyword: CREATE' in previous_error:
-                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt used CREATE TEMP TABLE.\nUse CTE (WITH clause) instead: WITH temp AS (SELECT ...) SELECT ... FROM temp"
+                sql_prompt += get_forbidden_keyword_feedback('CREATE')
 
             elif 'column' in previous_error.lower() and 'does not exist' in previous_error.lower():
-                sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\nYour previous attempt referenced a non-existent column.\nRemember: PostgreSQL converts unquoted column names to lowercase.\nALWAYS use double quotes: t.\"columnName\" not t.columnName"
+                sql_prompt += get_column_not_found_feedback()
 
-            logger.info(f"Retry {retry_count}: Added specific hint for error type")
+            logger.info(f"Retry {retry_count}: Added specific feedback for error type")
 
         response = llm_sql.invoke(sql_prompt)  # Temperature: 0.1 (accurate & safe queries)
         raw_content = response.content.strip()
@@ -429,7 +438,22 @@ def generate_SQL(state: SQLAgentState) -> dict:
         logger.info(f"SQL generated and validated: {sql_query[:100]}...")
         return {"sql_query": sql_query}
 
-    except (SchemaLoadError, SQLGenerationError, ValidationError) as e:
+    except SQLGenerationError as e:
+        # Validation failed - store error in state for retry logic
+        error_msg = f"Error: {str(e)}"
+        logger.error(f"SQL validation failed: {e}")
+        logger.debug(f"Failed SQL query: {sql_query if 'sql_query' in locals() else 'N/A'}")
+
+        # Return error in query_result AND messages so retry logic can process it
+        # messages is needed for retry_count tracking
+        return {
+            "sql_query": sql_query if 'sql_query' in locals() else None,
+            "query_result": error_msg,
+            "messages": [AIMessage(content=error_msg)]
+        }
+
+    except (SchemaLoadError, ValidationError) as e:
+        # Other errors - still raise
         logger.error(f"SQL generation failed: {e}")
         raise
 
@@ -454,6 +478,12 @@ def execute_SQL(state: SQLAgentState) -> dict:
     """
     sql_query = state.get('sql_query')
 
+    # If query_result already has an error (from validation failure), pass it through
+    query_result = state.get('query_result')
+    if query_result and 'Error:' in query_result:
+        logger.info("Skipping execution - validation error already in query_result")
+        return {}  # Don't overwrite query_result, just pass through
+
     if not sql_query:
         raise ValidationError("Missing sql_query in state")
 
@@ -465,7 +495,10 @@ def execute_SQL(state: SQLAgentState) -> dict:
     if retry_count >= MAX_RETRY_COUNT:
         error_msg = f"Error: Maximum retry limit ({MAX_RETRY_COUNT}) exceeded. Query failed."
         logger.error(f"Max retries exceeded for query: {sql_query}")
-        return {"query_result": error_msg}
+        return {
+            "query_result": error_msg,
+            "messages": [AIMessage(content=error_msg)]
+        }
 
     try:
         engine = get_cached_engine()
@@ -486,13 +519,19 @@ def execute_SQL(state: SQLAgentState) -> dict:
         # Database errors (syntax, connection, data type, etc.)
         error_msg = f"Error: {str(e)}"
         logger.warning(f"Database error: {e}")
-        return {"query_result": error_msg}
+        return {
+            "query_result": error_msg,
+            "messages": [AIMessage(content=error_msg)]
+        }
 
     except Exception as e:
         # Unexpected errors
         error_msg = f"Error: {str(e)}"
         logger.error(f"Unexpected error: {e}", exc_info=True)
-        return {"query_result": error_msg}
+        return {
+            "query_result": error_msg,
+            "messages": [AIMessage(content=error_msg)]
+        }
 
 def visualisation_request_classification(state: SQLAgentState) -> dict:
     """

@@ -735,6 +735,15 @@ NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
 ```
 
+## Documentation
+
+For developers and contributors:
+
+- **[Error Handling Guide](docs/ERROR-HANDLING.md)** - SQL validation, error types, retry mechanism, and debugging
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design and workflow *(coming soon)*
+- **[Development Guide](docs/DEVELOPMENT.md)** - Contributing and extending *(coming soon)*
+- **[SQL Reference](docs/sql.md)** - SQL patterns and examples
+
 ## License
 
 This project is developed as part of the Delivery Cadet Challenge 2026.

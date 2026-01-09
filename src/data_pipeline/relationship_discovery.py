@@ -118,9 +118,10 @@ def interactive_fk_matching(data_profile, pk_select_result) -> dict:
             hint = ""
             for ref_table in pk_select_result.keys():
                 if ref_table != table_name:
-                    col_core = col.replace("_id", "").replace("_", "")
-                    table_core = ref_table.replace("sales_", "").replace("media_", "").replace("_", "")
-                    if col_core.lower() in table_core.lower():
+                    # Generalized matching: remove common id suffixes and check if column name part is in table name
+                    # e.g., "customerID" -> "customer" which is in "sales_customers"
+                    col_core = col.lower().replace("_id", "").replace("id", "")
+                    if col_core and col_core in ref_table.lower():
                         hint = f" → {ref_table}? (suggested)"
                         break
             Console.info(f"[{i}] {col}{hint}", indent=0)

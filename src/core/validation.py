@@ -269,27 +269,41 @@ def validate_sql_query(sql_query: str, allowed_tables: Set[str]) -> bool:
         # Remove CTE names and subquery aliases from validation (they are not schema tables)
         # Handle fuzzy matching for CTEs (e.g. LLM generated "name_cte" but used "name")
         actual_tables = set()
+        
         for table in query_tables:
             # Check if it's a known CTE or subquery alias
             if table in cte_names or table in subquery_aliases:
+                # Skip this table because it is a CTE or subquery alias
                 continue
             
-            # Fuzzy check: if table is a prefix of any CTE name (e.g. "supplier" in "supplier_cte")
-            # or if any CTE name is a prefix of table (e.g. "supplier_cte" in "supplier_cte_1")
-            is_cte_variant = False
-            for cte in cte_names:
-                if table in cte or cte in table:
-                    is_cte_variant = True
-                    break
+            # # Fuzzy check: if table is a prefix of any CTE name (e.g. "supplier" in "supplier_cte")
+            # # or if any CTE name is a prefix of table (e.g. "supplier_cte" in "supplier_cte_1")
+            # is_cte_variant = False
+            # for cte in cte_names:
+            #     if table in cte or cte in table:
+            #         is_cte_variant = True
+            #         break
             
-            if is_cte_variant:
-                continue
+            # if is_cte_variant:
+            #     # Skip this table because it is a CTE variant
+            #     continue
                 
             actual_tables.add(table)
 
         # Check if all tables are in schema
         invalid_tables = actual_tables - allowed_tables
         if invalid_tables:
+            # Debug logging to understand what went wrong
+            logger.error(f"=== SQL Validation Failed ===")
+            logger.error(f"Invalid tables: {invalid_tables}")
+            logger.error(f"CTE names found: {cte_names}")
+            logger.error(f"Subquery aliases found: {subquery_aliases}")
+            logger.error(f"All extracted tables: {query_tables}")
+            logger.error(f"Actual tables (after filtering): {actual_tables}")
+            logger.error(f"Allowed tables: {sorted(allowed_tables)}")
+            logger.error(f"SQL query:\n{sql_query}")
+            logger.error(f"===========================")
+
             raise SQLGenerationError(
                 f"Unknown tables in query: {invalid_tables}",
                 details={'query': sql_query, 'allowed': list(allowed_tables)}

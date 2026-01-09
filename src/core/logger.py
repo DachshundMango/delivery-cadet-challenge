@@ -31,6 +31,13 @@ def setup_logger(name: str, log_file: str = None) -> logging.Logger:
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
 
+    # Suppress noisy logs from external libraries
+    logging.getLogger("langgraph").setLevel(logging.WARNING)
+    logging.getLogger("langchain").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
     # File handler for persistent logs (optional)
     if log_file:
         file_handler = logging.FileHandler(log_file)

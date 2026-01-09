@@ -34,6 +34,10 @@ from src.agent.feedbacks import (
     get_sql_comments_feedback,
     get_forbidden_keyword_feedback,
     get_column_not_found_feedback,
+    get_parsing_error_feedback,
+    get_division_by_zero_feedback,
+    get_datetime_format_feedback,
+    get_alias_reference_feedback,
 )
 from src.core.logger import setup_logger
 from src.core.db import get_db_engine
@@ -407,7 +411,26 @@ def generate_SQL(state: SQLAgentState) -> dict:
                 sql_prompt += get_forbidden_keyword_feedback('CREATE')
 
             elif 'column' in previous_error.lower() and 'does not exist' in previous_error.lower():
-                sql_prompt += get_column_not_found_feedback()
+                # Check if it's an alias reference issue (UndefinedColumn)
+                import re
+                match = re.search(r'column "(.+?)" does not exist', previous_error)
+                if match:
+                    column = match.group(1)
+                    # If the column is NOT in allowed_tables, it's likely an alias
+                    # (Simplified check: just provide the alias feedback as a hint)
+                    sql_prompt += get_alias_reference_feedback(column)
+                else:
+                    sql_prompt += get_column_not_found_feedback()
+
+            elif 'division by zero' in previous_error.lower():
+                sql_prompt += get_division_by_zero_feedback()
+
+            elif 'datetime' in previous_error.lower() and 'format' in previous_error.lower():
+                 sql_prompt += get_datetime_format_feedback()
+
+            else:
+                # Catch-all for other SQL errors (GroupingError, SyntaxError, etc.)
+                sql_prompt += get_parsing_error_feedback(previous_error)
 
             logger.info(f"Retry {retry_count}: Added specific feedback for error type")
 
@@ -436,7 +459,8 @@ def generate_SQL(state: SQLAgentState) -> dict:
         validate_sql_query(sql_query, allowed_tables)
 
         logger.info(f"SQL generated and validated: {sql_query[:100]}...")
-        return {"sql_query": sql_query}
+        # Clear previous error in query_result so execute_SQL runs the new query
+        return {"sql_query": sql_query, "query_result": None}
 
     except SQLGenerationError as e:
         # Validation failed - store error in state for retry logic
@@ -477,28 +501,32 @@ def execute_SQL(state: SQLAgentState) -> dict:
     Node Position: generate_SQL → execute_SQL → [retry/success]
     """
     sql_query = state.get('sql_query')
+    query_result = state.get('query_result')
+
+    # Calculate retry count first
+    messages = state.get('messages', [])
+    retry_count = sum(1 for msg in messages
+                      if 'Error:' in str(getattr(msg, 'content', '')))
 
     # If query_result already has an error (from validation failure), pass it through
-    query_result = state.get('query_result')
     if query_result and 'Error:' in query_result:
+        # Check retry limit only if we are still in error state
+        if retry_count >= MAX_RETRY_COUNT:
+            error_msg = f"Error: Maximum retry limit ({MAX_RETRY_COUNT}) exceeded. Query failed."
+            logger.error(f"Max retries exceeded for query: {sql_query}")
+            return {
+                "query_result": error_msg,
+                "messages": [AIMessage(content=error_msg)]
+            }
+
         logger.info("Skipping execution - validation error already in query_result")
         return {}  # Don't overwrite query_result, just pass through
 
     if not sql_query:
         raise ValidationError("Missing sql_query in state")
 
-    # Check retry count to prevent infinite loops
-    messages = state.get('messages', [])
-    retry_count = sum(1 for msg in messages
-                      if 'Error:' in str(getattr(msg, 'content', '')))
-
-    if retry_count >= MAX_RETRY_COUNT:
-        error_msg = f"Error: Maximum retry limit ({MAX_RETRY_COUNT}) exceeded. Query failed."
-        logger.error(f"Max retries exceeded for query: {sql_query}")
-        return {
-            "query_result": error_msg,
-            "messages": [AIMessage(content=error_msg)]
-        }
+    # If we get here, either it's the first try OR generate_SQL succeeded (query_result is None)
+    # So we execute regardless of retry_count history
 
     try:
         engine = get_cached_engine()
@@ -679,6 +707,16 @@ def create_plotly_chart(sql_result, chart_type, user_question=""):
         x_data.append(x_value)
         y_data.append(y_value)
 
+    # Try to convert y_data to numbers if they are strings representing numbers
+    try:
+        # Check if all values can be converted to float
+        numeric_y_data = [float(str(y).replace(',', '')) for y in y_data if y is not None]
+        if len(numeric_y_data) == len(y_data):
+            y_data = numeric_y_data
+    except (ValueError, TypeError):
+        # Keep as is if conversion fails
+        pass
+
     # Chart generation with layout customization
     if chart_type == "bar":
         fig = px.bar(x=x_data, y=y_data, text=y_data)
@@ -763,14 +801,29 @@ def generate_pyodide_analysis(state: SQLAgentState) -> dict:
     if "Error:" in sql_result or sql_result in ["[]", ""]:
         return {}
 
-    # Get prompt from prompts module
-    pyodide_prompt = get_pyodide_analysis_prompt(user_question, sql_result)
+    # Extract schema (first row) to show LLM the structure without full data
+    try:
+        data_list = json.loads(sql_result)
+        if data_list and len(data_list) > 0:
+            # Pass only the first row as sample to keep prompt light and data-agnostic
+            data_sample = json.dumps([data_list[0]])
+        else:
+            data_sample = "[]"
+    except json.JSONDecodeError:
+        return {}
 
-    response = llm_sql.invoke(pyodide_prompt)  # Temperature: 0.1 (code generation needs accuracy)
-    code = response.content.replace("```python", "").replace("```", "").strip()
+    # Get prompt from prompts module (passing sample only)
+    pyodide_prompt = get_pyodide_analysis_prompt(user_question, data_sample)
+
+    response = llm_sql.invoke(pyodide_prompt)  # Temperature: 0.1
+    generated_code = response.content.replace("```python", "").replace("```", "").strip()
+
+    # Inject the FULL data into the code dynamically
+    # This prevents hardcoding and handles large datasets efficiently
+    final_code = f"import json\n\n# Injected data\ndata = json.loads('{sql_result}')\n\n# Analysis Code\n{generated_code}"
     
     tool_message = ToolMessage(
-        content=code,
+        content=final_code,
         tool_call_id="call_python_interpreter",
         name="python_interpreter"
     )
@@ -800,7 +853,8 @@ def generate_response(state: SQLAgentState) -> dict:
         )]}
 
     # Get prompt from prompts module
-    response_prompt = get_response_generation_prompt(question, result)
+    needs_pyodide = state.get('needs_pyodide', False)
+    response_prompt = get_response_generation_prompt(question, result, needs_pyodide)
 
     response = llm_response.invoke(response_prompt)  # Temperature: 0.7 (natural & varied)
     raw_content = response.content.strip()

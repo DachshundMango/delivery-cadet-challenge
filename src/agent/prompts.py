@@ -142,7 +142,12 @@ Before writing the query, think through:
    d) **Multi-step logic**: CTE (WITH clause)
       WITH temp AS (SELECT ...) SELECT * FROM temp
 
-7. **Honor user requests** - Use explicitly requested SQL features
+   7. **Common Pitfalls (CRITICAL):**
+      - **Dates**: "dateTime" is TEXT. Use `::timestamp` casting. DO NOT use `TO_TIMESTAMP()` with format strings.
+      - **Division**: Prevent zero division errors: `x / NULLIF(y, 0)`.
+      - **Aliases**: Do NOT reference aliases in the same level.
+
+   8. **Honor user requests** - Use explicitly requested SQL features
 </instructions>
 
 <output_format>
@@ -242,13 +247,13 @@ OR
 # Pyodide (Python Analysis)
 # ===============================================================
 
-def get_pyodide_analysis_prompt(user_question: str, sql_result: str) -> str:
+def get_pyodide_analysis_prompt(user_question: str, data_sample: str) -> str:
     """
     Generate prompt for Pyodide-based Python analysis.
 
     Args:
         user_question: The user's question requesting analysis
-        sql_result: JSON string of SQL query results to analyze
+        data_sample: JSON string showing ONE row of data to understand structure (NOT the full dataset)
 
     Returns:
         Formatted prompt string
@@ -257,20 +262,44 @@ def get_pyodide_analysis_prompt(user_question: str, sql_result: str) -> str:
 
 User Question: "{user_question}"
 
-Database Result (JSON format):
-{sql_result}
+Data Structure (Sample Row):
+{data_sample}
 
 Generate Python code to analyze this data. CRITICAL RULES:
 
-1. MANDATORY: Use the JSON data provided above - DO NOT create sample data
-2. Import pandas: import pandas as pd
-3. Load the actual data: df = pd.DataFrame({sql_result})
-4. Perform ONLY the analysis requested (correlation, statistics, grouping, etc.)
-5. Print the result using print() - this is what the user will see
-6. DO NOT use matplotlib or plotting libraries - only pandas operations
-7. Keep output concise and readable
+1. **Dynamic Data Loading**:
+   - The full dataset is ALREADY loaded in a variable named `data`.
+   - Your code must start by creating the DataFrame: `df = pd.DataFrame(data)`
+   - DO NOT define the `data` variable yourself. It is injected automatically.
 
-Return ONLY executable Python code below. NO markdown code blocks, NO explanations, NO text before or after the code:
+2. **No Hardcoding**:
+   - NEVER hardcode values or results.
+   - ❌ BAD: `print("Correlation is 0.85")`
+   - ✅ GOOD: `print(f"Correlation: {{df['quantity'].corr(df['total']).round(2)}}")`
+   - The code must calculate values dynamically from the DataFrame.
+
+3. **Handle Missing Values**:
+   - Check for NaN/None values programmatically.
+   - Example: `if df['col'].notna().any(): ...`
+
+4. **Use Actual Columns Only (CRITICAL)**:
+   - CHECK the "Data Structure" above carefully.
+   - If the data is ALREADY aggregated (contains 'mean', 'count', 'std_dev'), DO NOT try to aggregate it again.
+   - Just print/format the existing data nicely.
+   - ❌ BAD: `df.groupby('size')['value'].mean()` (when 'mean' column already exists)
+   - ✅ GOOD: `print(df[['size', 'mean', 'std_dev']])`
+
+5. **Data Type Conversion (CRITICAL)**:
+   - SQL results often come as strings (e.g., "123.45") to preserve precision.
+   - You MUST convert numeric columns using `pd.to_numeric(df['col'])` before doing ANY math or comparison.
+   - Example: `df['mean'] = pd.to_numeric(df['mean'])`
+
+6. **Output Format**:
+   - Use `print()` to show the final analysis.
+   - Do NOT use matplotlib or plotting libraries - text output only.
+   - Import pandas as pd.
+
+Return ONLY executable Python code below. NO markdown, NO explanations:
 """
 
 
@@ -408,13 +437,14 @@ Return ONLY the JSON object below. NO markdown, NO explanations, NO text before 
 # Response Generation
 # ===============================================================
 
-def get_response_generation_prompt(question: str, result: str) -> str:
+def get_response_generation_prompt(question: str, result: str, needs_pyodide: bool = False) -> str:
     """
     Generate prompt for natural language response from SQL results.
 
     Args:
         question: The user's original question
         result: JSON string of SQL query results
+        needs_pyodide: Whether Python analysis is being performed
 
     Returns:
         Formatted prompt string
@@ -422,18 +452,34 @@ def get_response_generation_prompt(question: str, result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = result[:1000] if len(result) > 1000 else result
 
+    pyodide_instruction = ""
+    if needs_pyodide:
+        pyodide_instruction = """
+        **CRITICAL INSTRUCTION FOR PYTHON ANALYSIS:**
+        The user has requested a complex analysis that is being performed by a Python script (Pyodide).
+        The SQL result provided here might be raw data for that script, NOT the final answer.
+        
+        Therefore:
+        1. DO NOT say "information is missing" or "cannot be determined".
+        2. Briefly explain what the data represents.
+        3. Explicitly mention that "Advanced statistical analysis is being generated in the Python console below."
+        4. Focus on the structure of the data rather than the final calculated value (which Python will compute).
+        """
+
     return f"""You are a data analyst converting SQL results into natural language. Think step-by-step before responding.
 
-**Question:** {question}
-**Data (JSON):** {truncated_result}
+    **Question:** {question}
+    **Data (JSON):** {truncated_result}
 
-**ANALYSIS STEPS:**
-Before writing your answer:
-1. First, parse the JSON structure - identify what columns are present
-2. Understand what each row represents in relation to the question
-3. Identify the key insight or pattern that answers the question
-4. Check for any surprising trends or outliers in the data
-5. Formulate a clear, concise natural language response
+    {pyodide_instruction}
+
+    **ANALYSIS STEPS:**
+    Before writing your answer:
+    1. First, parse the JSON structure - identify what columns are present
+    2. Understand what each row represents in relation to the question
+    3. Identify the key insight or pattern that answers the question
+    4. Check for any surprising trends or outliers in the data
+    5. Formulate a clear, concise natural language response
 
 **CRITICAL INSTRUCTIONS:**
 1. Parse the JSON properly - each object has key-value pairs

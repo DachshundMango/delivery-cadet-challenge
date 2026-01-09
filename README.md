@@ -740,8 +740,8 @@ NEXT_PUBLIC_ASSISTANT_ID=agent
 For developers and contributors:
 
 - **[Error Handling Guide](docs/ERROR-HANDLING.md)** - SQL validation, error types, retry mechanism, and debugging
-- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design and workflow *(coming soon)*
-- **[Development Guide](docs/DEVELOPMENT.md)** - Contributing and extending *(coming soon)*
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design, LangGraph workflow, and component details
+- **[Development Guide](docs/DEVELOPMENT.md)** - Setup, contributing, testing, and common tasks
 - **[SQL Reference](docs/sql.md)** - SQL patterns and examples
 
 ## License

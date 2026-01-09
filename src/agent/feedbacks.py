@@ -200,6 +200,44 @@ JOIN customers c ON o."customerID" = c."id"
 """
 
 
+def get_division_by_zero_feedback() -> str:
+    """
+    Generate feedback for "Division by zero" error.
+    """
+    return """
+    **Fix: Division by Zero Error**
+    - You are trying to divide by a value that is ZERO (likely STDDEV, SUM, or COUNT).
+    - Use `NULLIF(column, 0)` to handle division by zero safely.
+    - Example: `col_a / NULLIF(col_b, 0)` -> Returns NULL instead of error.
+    - Particularly common when calculating SKEWNESS or normalisation where STDDEV can be 0.
+    """
+
+def get_datetime_format_feedback() -> str:
+    """
+    Generate feedback for datetime format errors.
+    """
+    return """
+    **Fix: Datetime Format Error**
+    - The 'dateTime' column is TEXT and may contain ISO formats (e.g., '2023-01-01T12:00:00').
+    - Your format string in TO_TIMESTAMP() failed.
+    - SOLUTION: Use direct casting instead: `"dateTime"::timestamp`
+    - PostgreSQL handles ISO formats automatically when casting.
+    """
+
+def get_alias_reference_feedback(column_name: str) -> str:
+    """
+    Generate feedback for "column does not exist" when it's likely an alias issue.
+    """
+    return f"""
+    **Fix: Alias Reference Error ("{column_name}" does not exist)**
+    - You defined "{column_name}" as an ALIAS in the SELECT clause (e.g., `... AS {column_name}`).
+    - You CANNOT use an alias in the same SELECT or WHERE clause.
+    - **Solution:** Wrap the calculation in a CTE or Subquery first.
+    - Example:
+      WITH stats AS (SELECT a+b AS my_alias FROM table)
+      SELECT * FROM stats WHERE my_alias > 10
+    """
+
 def get_parsing_error_feedback(error_message: str) -> str:
     """
     Generate feedback for general SQL parsing errors.

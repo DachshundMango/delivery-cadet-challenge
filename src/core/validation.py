@@ -150,20 +150,31 @@ def _extract_table_names(parsed_query) -> Set[str]:
     """
     Extract table names from parsed SQL query.
     Handles FROM clauses, JOIN clauses, and subqueries.
-    
-    It scans the token stream for FROM/JOIN keywords and captures the following identifiers.
-    
+
+    Improved logic to distinguish table references from column references
+    in function contexts (e.g., EXTRACT(field FROM column)).
+
     Args:
         parsed_query: sqlparse parsed SQL statement
-    
+
     Returns:
         Set of table names (lowercase)
     """
+    from sqlparse.sql import Function, Parenthesis
+
     tables = set()
     from_or_join_seen = False
 
     for token in parsed_query.tokens:
-        # Check for FROM or JOIN keywords
+        # Skip FROM keywords inside function calls
+        # Functions are parsed as Function or Parenthesis tokens
+        # This prevents EXTRACT(DOW FROM column) from being parsed as a table reference
+        if isinstance(token, (Function, Parenthesis)):
+            # Do NOT recursively process - skip entirely to avoid false positives
+            # FROM inside functions (like EXTRACT(DOW FROM column)) should be ignored
+            continue
+
+        # Check for FROM or JOIN keywords (only at statement level, not inside functions)
         if token.ttype is Keyword and token.value.upper() in ('FROM', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS'):
             from_or_join_seen = True
             continue
@@ -193,8 +204,8 @@ def _extract_table_names(parsed_query) -> Set[str]:
                             tables.add(table_name.strip('"').strip('`').lower())
                 from_or_join_seen = False
 
-        # Recursively handle subqueries
-        if hasattr(token, 'tokens'):
+        # Recursively handle subqueries (non-function parentheses already handled above)
+        if hasattr(token, 'tokens') and not isinstance(token, (Function, Parenthesis)):
             subtables = _extract_table_names(token)
             tables.update(subtables)
 

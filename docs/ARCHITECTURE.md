@@ -168,60 +168,82 @@ cadet/
     ┌──────┴──────┐
     │             │
     ▼             ▼
-┌───────────┐  ┌─────────────────────────┐
-│generate_  │  │generate_general_response│
-│   SQL     │  └───────────┬─────────────┘
-└─────┬─────┘              │ (Temperature: 0.7 - natural)
-      │                    │
-      ▼                    ▼
-┌───────────┐           ┌─────┐
-│execute_SQL│           │ END │
-└─────┬─────┘           └─────┘
-      │
-  ┌───┴───┐
-  │ Error?│  (check_query_validation)
-  └───┬───┘
-      │
-  ┌───┴───────┐
-  │           │
-  ▼           ▼
-[retry]   [success]
-  │           │
-  │           ▼
-  │     ┌──────────────────────────────┐
-  │     │visualisation_request_        │
-  │     │      classification          │  Keyword-based chart detection
-  │     └───────────┬──────────────────┘  (Temperature: 0.0 - strict)
-  │                 │
-  │                 ▼
-  │     ┌──────────────────────────────┐
-  │     │pyodide_request_              │
-  │     │      classification          │  Check for analysis keywords
-  │     └───────────┬──────────────────┘
-  │                 │
-  │           ┌─────┴──────┐
-  │           │            │
-  │           ▼            ▼
-  │    [needs_pyodide] [skip]
-  │           │            │
-  │           ▼            │
-  │  ┌─────────────────┐  │
-  │  │generate_pyodide_│  │  Generate pandas analysis code
-  │  │    analysis     │  │
-  │  └────────┬────────┘  │
-  │           │            │
-  │           └────┬───────┘
-  │                ▼
-  │           ┌───────────────┐
-  │           │generate_      │
-  │           │  response     │  Format natural language answer
-  │           └───────┬───────┘  (Temperature: 0.7 - conversational)
-  │                   │
-  └───────────────────┤
-                      ▼
-                   ┌─────┐
-                   │ END │
-                   └─────┘
+┌──────────────────────────────┐  ┌─────────────────────────┐
+│pyodide_request_              │  │generate_general_response│
+│      classification          │  └───────────┬─────────────┘
+│                              │              │ (Temperature: 0.7)
+│ Check for analysis keywords  │              ▼
+└───────────┬──────────────────┘           ┌─────┐
+            │                              │ END │
+      ┌─────┴──────┐                       └─────┘
+      │            │
+      ▼            ▼
+ [needs_     [skip_
+  pyodide]    pyodide]
+      │            │
+      └────┬───────┘
+           ▼
+      ┌───────────┐
+      │generate_  │  Uses simple SQL (pyodide=True)
+      │   SQL     │  or complex SQL (pyodide=False)
+      └─────┬─────┘  (Temperature: 0.1 - accurate)
+            │
+            ▼
+      ┌───────────┐
+      │execute_SQL│
+      └─────┬─────┘
+            │
+        ┌───┴───┐
+        │ Error?│  (check_query_validation)
+        └───┬───┘
+            │
+        ┌───┴───────┐
+        │           │
+        ▼           ▼
+    [retry]     [success]
+        │           │
+        │           ▼
+        │     ┌──────────────────────────────┐
+        │     │visualisation_request_        │
+        │     │      classification          │  Keyword-based chart detection
+        │     └───────────┬──────────────────┘  (Temperature: 0.0 - strict)
+        │                 │
+        │           ┌─────┴──────┐
+        │           │            │
+        │           ▼            ▼
+        │     [needs_viz]    [skip_viz]
+        │           │            │
+        │           └─────┬──────┘
+        │                 │
+        │                 ▼
+        │     ┌──────────────────────────────┐
+        │     │Check needs_pyodide from      │
+        │     │     earlier classification   │
+        │     └───────────┬──────────────────┘
+        │                 │
+        │           ┌─────┴──────┐
+        │           │            │
+        │           ▼            ▼
+        │    [needs_pyodide] [skip]
+        │           │            │
+        │           ▼            │
+        │  ┌─────────────────┐  │
+        │  │generate_pyodide_│  │  Generate pandas analysis code
+        │  │    analysis     │  │
+        │  └────────┬────────┘  │
+        │           │            │
+        │           └────┬───────┘
+        │                ▼
+        │           ┌───────────────┐
+        │           │generate_      │
+        │           │  response     │  Format natural language answer
+        │           └───────┬───────┘  (Temperature: 0.7 - conversational)
+        │                   │
+        └───────────────────┤
+                            ▼
+                         ┌─────┐
+                         │ END │
+                         └─────┘
 ```
 
 ### Retry Mechanism (Updated 2026-01-09)
@@ -262,24 +284,40 @@ validate_sql_query() (validation.py)
 - **Purpose:** Routes between SQL generation and general conversation
 - **Output:** `"sql"` or `"general"`
 
-### 2. SQL Generation
+### 2. SQL Generation (Updated 2026-01-10)
 - **Node:** `generate_SQL`
 - **LLM Temperature:** 0.1 (accurate, low variance)
+- **Prompt Selection:** Conditional based on `needs_pyodide` flag
+  - **Simple SQL Prompt** (pyodide=True): Fetches raw data for Python analysis
+    - No aggregations (AVG, SUM, COUNT)
+    - No window functions (PARTITION BY, RANK)
+    - No date functions (EXTRACT, TO_DATE, DATE_TRUNC)
+    - Just SELECT columns AS-IS for Pandas processing
+  - **Complex SQL Prompt** (pyodide=False): Full analytical queries
+    - Aggregations, joins, subqueries allowed
+    - Database performs all computation
 - **Process:**
   1. Load schema from `schema_info.json` (cached)
-  2. Generate prompt with schema context
-  3. If retry: Add error-specific feedback from `feedbacks.py`
-  4. Call LLM to generate SQL
-  5. Parse XML response: `<reasoning>` + `<sql>`
-  6. Validate SQL for security and correctness
+  2. Check `needs_pyodide` flag from earlier classification
+  3. Select appropriate prompt (simple vs complex)
+  4. If retry: Add error-specific feedback from `feedbacks.py`
+  5. Call LLM to generate SQL
+  6. Parse XML response: `<reasoning>` + `<sql>`
+  7. Validate SQL for security and correctness
 
-### 3. SQL Validation (validation.py)
+### 3. SQL Validation (validation.py - Updated 2026-01-10)
 - **Purpose:** Prevent SQL injection and ensure query correctness
 - **Checks:**
   1. Forbidden keywords (DROP, DELETE, UPDATE, etc.)
   2. Multiple statements (semicolon check)
   3. Comments (-- or /* */)
   4. Unknown table names (with CTE/alias filtering)
+- **Table Extraction Logic:**
+  - Uses `sqlparse` to parse SQL into tokens
+  - Skips `Function` and `Parenthesis` tokens to avoid false positives
+  - **Bug Fix (2026-01-10):** Previously, `EXTRACT(DOW FROM "dateTime")` was incorrectly extracting "datetime" as a table name due to recursive processing of function tokens
+  - **Solution:** Function/Parenthesis tokens are now skipped entirely without recursion
+  - Only statement-level FROM/JOIN clauses are processed for table extraction
 - **On Error:** Raises `SQLGenerationError` with detailed debug logs
 
 ### 4. Query Execution
@@ -298,11 +336,20 @@ validate_sql_query() (validation.py)
 - **Default:** `"no"` (prevents over-generation)
 - **Chart Types:** bar (comparison), line (time series), pie (proportions)
 
-### 6. Pyodide Request Classification
+### 6. Pyodide Request Classification (Updated 2026-01-10)
 - **Node:** `pyodide_request_classification`
-- **Current:** Keyword-based (correlation, statistics, describe, etc.)
-- **Future:** LLM-based classification with multilingual support
-- **Output:** `needs_pyodide` boolean
+- **Execution Order:** **BEFORE** SQL generation (prevents complex SQL when simple data fetch is needed)
+- **Method:** Keyword-based detection
+- **Keywords:**
+  - `correlation`, `statistical analysis`, `statistics`
+  - `standard deviation`, `variance`, `mean`
+  - `distribution`, `skewness`, `kurtosis`
+  - `outlier`, `outliers`, `percentile`, `quartile`
+  - `time series`, `trend`, `seasonality`
+  - `describe`, `summary`
+- **Output:** `needs_pyodide` boolean (stored in state for later use)
+- **Purpose:** Triggers simple SQL prompt to fetch raw data instead of performing analysis in database
+- **Future Enhancement:** LLM-based classification with multilingual support
 
 ### 7. Chart Generation
 - **Technology:** Plotly.js + react-plotly.js
@@ -564,5 +611,9 @@ validate_sql_query() (validation.py)
 
 ---
 
-**Last Updated:** 2026-01-09
-**Version:** 1.0
+**Last Updated:** 2026-01-10
+**Version:** 1.1
+**Recent Changes:**
+- Workflow restructured: Pyodide classification now runs BEFORE SQL generation
+- Added simple SQL prompt for pyodide-based analysis (no aggregations/functions)
+- Fixed validation.py to skip Function/Parenthesis tokens (prevents false table extraction)

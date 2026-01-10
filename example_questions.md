@@ -22,16 +22,6 @@
 - Calculate the running cumulative revenue per day, and create a visualization showing both daily revenue and the cumulative total over time.
 - For each transaction, calculate how its total price compares to the average transaction value for that franchise (as a percentage). Show the top 10 transactions that most exceeded their franchise average.
 
-# Advanced Analysis (Python/Pyodide)
-
-- Calculate the correlation between unit price and quantity sold for all transactions. Is there a statistically significant relationship?
-- Perform a statistical analysis of transaction total prices. Show the mean, median, standard deviation, and quartiles to understand the spending distribution.
-- Analyze the distribution of customer reviews by rating. Calculate the variance and standard deviation of ratings for each franchise size.
-Analyze the distribution of review counts by franchise size. Calculate the variance and standard deviation of review counts.
-
-Pyodide의 분석 능력을 돋보이게 할 수 있는 "깔쌈한 답변 유도용" 질문 리스트입니다.
-각 질문은 단순 SQL 조회로는 얻기 힘든 통계적/분석적 결과를 Python으로 계산하도록 유도합니다.
-
 ---
 
 ### 1. 매장 규모별 매출 분포 (Boxplot 스타일 통계)

@@ -143,7 +143,10 @@ Before writing the query, think through:
       WITH temp AS (SELECT ...) SELECT * FROM temp
 
    7. **Common Pitfalls (CRITICAL):**
-      - **Dates**: "dateTime" is TEXT. Use `::timestamp` casting. DO NOT use `TO_TIMESTAMP()` with format strings.
+      - **Dates**: If date/time columns are stored as TEXT, use `::timestamp` casting for auto-parsing.
+        ✓ CORRECT: column_name::timestamp (works with ISO 8601 and other standard formats)
+        ✗ WRONG: TO_DATE(column_name, 'format') or TO_TIMESTAMP(column_name, 'format')
+        Example: EXTRACT(DOW FROM date_column::timestamp)
       - **Division**: Prevent zero division errors: `x / NULLIF(y, 0)`.
       - **Aliases**: Do NOT reference aliases in the same level.
 
@@ -246,6 +249,52 @@ OR
 # ===============================================================
 # Pyodide (Python Analysis)
 # ===============================================================
+
+def get_simple_sql_for_pyodide_prompt(schema_info: str, user_question: str) -> str:
+    """
+    Generate prompt for creating simple SELECT queries for Pyodide analysis.
+
+    When statistical analysis is needed, we want to fetch raw data rather than
+    performing complex aggregations in SQL. Pyodide will handle the analysis.
+
+    Args:
+        schema_info: Database schema information
+        user_question: The user's question
+
+    Returns:
+        Formatted prompt string for simple SQL generation
+    """
+    return f"""You are an expert PostgreSQL query generator. The user wants statistical analysis that will be performed by Python/Pandas.
+
+<database_schema>
+{schema_info}
+</database_schema>
+
+<user_question>
+{user_question}
+</user_question>
+
+**TASK**: Generate a SIMPLE SELECT query to fetch the RAW DATA needed for analysis.
+
+**CRITICAL RULES:**
+1. **DO NOT perform statistical calculations** (no AVG, STDDEV, percentile functions, etc.)
+2. **DO NOT use window functions** (no PARTITION BY, RANK, etc.)
+3. **DO NOT use date functions** (no EXTRACT, TO_DATE, DATE_TRUNC, etc.)
+4. **Just SELECT the relevant columns AS-IS** from the appropriate table(s)
+5. **You MAY use JOINs** if multiple tables are needed
+6. **You MAY use WHERE** to filter irrelevant data
+7. **Keep it simple** - Pandas will do ALL analysis (statistical, temporal, etc.)
+
+**Examples:**
+Question: "Calculate correlation between price and quantity"
+✓ GOOD: SELECT "unitPrice", "quantity" FROM "sales_transactions"
+✗ BAD:  WITH stats AS (SELECT AVG("unitPrice")...) SELECT correlation...
+
+Question: "Time series analysis of transactions by day of week"
+✓ GOOD: SELECT "dateTime", "transactionID" FROM "sales_transactions"
+✗ BAD:  SELECT EXTRACT(DOW FROM "dateTime"::timestamp) AS day_of_week...
+
+Return ONLY the SQL query. NO explanations, NO markdown:"""
 
 def get_pyodide_analysis_prompt(user_question: str, data_sample: str) -> str:
     """
@@ -556,6 +605,7 @@ __all__ = [
     'get_intent_classification_prompt',
     'get_general_response_prompt',
     'get_sql_generation_prompt',
+    'get_simple_sql_for_pyodide_prompt',
     'get_visualization_prompt',
     'get_pyodide_analysis_prompt',
     'get_data_masking_prompt',

@@ -24,6 +24,7 @@ from src.agent.prompts import (
     get_intent_classification_prompt,
     get_general_response_prompt,
     get_sql_generation_prompt,
+    get_simple_sql_for_pyodide_prompt,
     get_visualization_prompt,
     get_pyodide_analysis_prompt,
     get_response_generation_prompt,
@@ -372,8 +373,19 @@ def generate_SQL(state: SQLAgentState) -> dict:
             schema_data = json.load(f)
         allowed_tables = set(schema_data['tables'].keys())
 
+        # Check if pyodide analysis is needed
+        needs_pyodide = state.get('needs_pyodide', False)
+
+        logger.info(f"SQL Generation: needs_pyodide={needs_pyodide}")
+
         # Get base prompt from prompts module
-        sql_prompt = get_sql_generation_prompt(schema_info, user_question)
+        # If pyodide is needed, use simpler SQL prompt to just fetch raw data
+        if needs_pyodide:
+            logger.info("Using simple SQL prompt for Pyodide analysis")
+            sql_prompt = get_simple_sql_for_pyodide_prompt(schema_info, user_question)
+        else:
+            logger.info("Using complex SQL prompt for direct analysis")
+            sql_prompt = get_sql_generation_prompt(schema_info, user_question)
 
         # Check if this is a retry (look for previous errors in message history)
         messages = state.get('messages', [])
@@ -769,6 +781,7 @@ def pyodide_request_classification(state: SQLAgentState) -> dict:
 
     # Safety check: ensure user_question is a string
     if not user_question or not isinstance(user_question, str):
+        logger.warning("Pyodide classification: invalid user_question")
         return {
             "needs_pyodide": False
         }
@@ -779,10 +792,19 @@ def pyodide_request_classification(state: SQLAgentState) -> dict:
         'statistical analysis',
         'standard deviation',
         'variance',
-        'distribution analysis'
+        'distribution',  # Covers "distribution analysis", "price distribution", etc.
+        'skewness',
+        'kurtosis',
+        'outlier',
+        'outliers',
+        'percentile',
+        'quartile',
+        'time series'  # Covers "time series analysis"
     ]
 
     needs_pyodide = any(keyword in user_question.lower() for keyword in pyodide_keywords)
+
+    logger.info(f"Pyodide classification: needs_pyodide={needs_pyodide} for question: {user_question[:50]}...")
 
     return {
         "needs_pyodide": needs_pyodide

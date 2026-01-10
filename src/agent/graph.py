@@ -67,9 +67,15 @@ workflow.add_edge(START, "read_question")
 workflow.add_edge("read_question", "intent_classification")
 
 workflow.add_conditional_edges(
-    "intent_classification", 
+    "intent_classification",
     check_intent_classification,
-    {"sql":"generate_SQL", "general": "generate_general_response"}
+    {"sql":"pyodide_request_classification", "general": "generate_general_response"}
+)
+
+workflow.add_conditional_edges(
+    "pyodide_request_classification",
+    check_pyodide_classification,
+    {"pyodide":"generate_SQL", "skip":"generate_SQL"}
 )
 
 workflow.add_edge("generate_SQL", "execute_SQL")
@@ -80,10 +86,8 @@ workflow.add_conditional_edges(
     {"retry":"generate_SQL", "success": "visualisation_request_classification"}
 )
 
-workflow.add_edge("visualisation_request_classification", "pyodide_request_classification")
-
 workflow.add_conditional_edges(
-    "pyodide_request_classification",
+    "visualisation_request_classification",
     check_pyodide_classification,
     {"pyodide":"generate_pyodide_analysis", "skip":"generate_response"}
 )

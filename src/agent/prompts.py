@@ -317,9 +317,9 @@ Data Structure (Sample Row):
 Generate Python code to analyze this data. CRITICAL RULES:
 
 1. **Dynamic Data Loading**:
-   - The full dataset is ALREADY loaded in a variable named `data`.
-   - Your code must start by creating the DataFrame: `df = pd.DataFrame(data)`
-   - DO NOT define the `data` variable yourself. It is injected automatically.
+   - The full dataset is ALREADY loaded in a string variable named `csv_data` (CSV format).
+   - Your code must start by loading it: `df = pd.read_csv(io.StringIO(csv_data))`
+   - DO NOT define the `csv_data` variable yourself. It is injected automatically.
 
 2. **No Hardcoding**:
    - NEVER hardcode values or results.

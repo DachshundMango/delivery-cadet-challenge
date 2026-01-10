@@ -17,6 +17,8 @@ Key Components:
 import ast
 import os
 import json
+import csv
+import io
 from typing import Optional
 from dotenv import load_dotenv
 from src.agent.state import SQLAgentState
@@ -829,8 +831,21 @@ def generate_pyodide_analysis(state: SQLAgentState) -> dict:
         if data_list and len(data_list) > 0:
             # Pass only the first row as sample to keep prompt light and data-agnostic
             data_sample = json.dumps([data_list[0]])
+            
+            # Convert to CSV for efficient injection
+            output = io.StringIO()
+            if isinstance(data_list[0], dict):
+                keys = data_list[0].keys()
+                writer = csv.DictWriter(output, fieldnames=keys)
+                writer.writeheader()
+                # Handle None values as empty strings
+                for row in data_list:
+                    clean_row = {k: (v if v is not None else "") for k, v in row.items()}
+                    writer.writerow(clean_row)
+            csv_data = output.getvalue()
         else:
             data_sample = "[]"
+            csv_data = ""
     except json.JSONDecodeError:
         return {}
 
@@ -840,9 +855,15 @@ def generate_pyodide_analysis(state: SQLAgentState) -> dict:
     response = llm_sql.invoke(pyodide_prompt)  # Temperature: 0.1
     generated_code = response.content.replace("```python", "").replace("```", "").strip()
 
-    # Inject the FULL data into the code dynamically
-    # This prevents hardcoding and handles large datasets efficiently
-    final_code = f"import json\n\n# Injected data\ndata = json.loads('{sql_result}')\n\n# Analysis Code\n{generated_code}"
+    # Inject the CSV data into the code dynamically
+    final_code = f"""import pandas as pd
+import io
+
+# Injected data (CSV format)
+csv_data = {repr(csv_data)}
+
+# Analysis Code
+{generated_code}"""
     
     tool_message = ToolMessage(
         content=final_code,

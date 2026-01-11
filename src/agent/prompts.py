@@ -187,6 +187,26 @@ Now generate your response following the format above:
 # Visualization Classification
 # ===============================================================
 
+def get_chart_title_prompt(user_question: str, chart_type: str) -> str:
+    """
+    Generate minimal prompt for chart title generation (token-optimized).
+    
+    Uses minimal tokens (~30-60) while maintaining quality with Temperature 0.0.
+    The llama-3.3-70b model is capable enough to understand brief instructions.
+    
+    Args:
+        user_question: User's original question
+        chart_type: Type of chart (bar, line, pie)
+    
+    Returns:
+        Minimal prompt string optimized for token efficiency
+    """
+    return f"""Create chart title (max 60 chars, Title Case):
+Q: {user_question}
+Type: {chart_type}
+Title:"""
+
+
 def get_visualization_prompt(user_question: str, sql_result: str) -> str:
     """
     Generate prompt to determine if visualization is needed.
@@ -607,6 +627,7 @@ __all__ = [
     'get_sql_generation_prompt',
     'get_simple_sql_for_pyodide_prompt',
     'get_visualization_prompt',
+    'get_chart_title_prompt',
     'get_pyodide_analysis_prompt',
     'get_data_masking_prompt',
     'get_response_generation_prompt',

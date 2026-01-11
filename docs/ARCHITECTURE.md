@@ -17,14 +17,15 @@ This document provides a comprehensive overview of Delivery Cadet's system desig
 
 ```
 cadet/
-├── src/                          # Python backend source code (3,872 LOC)
-│   ├── agent/                    # LangGraph agent workflow (1,503 LOC)
+├── src/                          # Python backend source code
+│   ├── agent/                    # LangGraph agent workflow
 │   │   ├── __init__.py           # Public API exports
-│   │   ├── graph.py              # LangGraph workflow definition (95 LOC)
-│   │   ├── nodes.py              # Agent node implementations (791 LOC)
-│   │   ├── prompts.py            # LLM prompt templates (517 LOC)
-│   │   ├── feedbacks.py          # Error feedback messages (268 LOC) 🆕
-│   │   └── state.py              # State management schema (60 LOC)
+│   │   ├── graph.py              # LangGraph workflow definition (115 LOC)
+│   │   ├── nodes.py              # Agent node implementations (889 LOC)
+│   │   ├── prompts.py            # LLM prompt templates
+│   │   ├── feedbacks.py          # Error feedback messages (306 LOC) 🆕
+│   │   ├── error_feedback.py     # Error feedback router (114 LOC) 🆕
+│   │   └── state.py              # State management schema (65 LOC)
 │   │
 │   ├── data_pipeline/            # ETL and data preparation (1,606 LOC)
 │   │   ├── __init__.py           # Public API exports
@@ -178,14 +179,13 @@ cadet/
       ┌─────┴──────┐                       └─────┘
       │            │
       ▼            ▼
- [needs_     [skip_
-  pyodide]    pyodide]
+ [needs_pyodide=True]  [needs_pyodide=False]
       │            │
       └────┬───────┘
            ▼
       ┌───────────┐
-      │generate_  │  Uses simple SQL (pyodide=True)
-      │   SQL     │  or complex SQL (pyodide=False)
+      │generate_  │  Uses simple SQL (needs_pyodide=True)
+      │   SQL     │  or complex SQL (needs_pyodide=False)
       └─────┬─────┘  (Temperature: 0.1 - accurate)
             │
             ▼
@@ -193,86 +193,111 @@ cadet/
       │execute_SQL│
       └─────┬─────┘
             │
-        ┌───┴───┐
-        │ Error?│  (check_query_validation)
-        └───┬───┘
-            │
-        ┌───┴───────┐
-        │           │
-        ▼           ▼
-    [retry]     [success]
-        │           │
-        │           ▼
-        │     ┌──────────────────────────────┐
-        │     │visualisation_request_        │
-        │     │      classification          │  Keyword-based chart detection
-        │     └───────────┬──────────────────┘  (Temperature: 0.0 - strict)
-        │                 │
-        │           ┌─────┴──────┐
-        │           │            │
-        │           ▼            ▼
-        │     [needs_viz]    [skip_viz]
-        │           │            │
-        │           └─────┬──────┘
-        │                 │
-        │                 ▼
-        │     ┌──────────────────────────────┐
-        │     │Check needs_pyodide from      │
-        │     │     earlier classification   │
-        │     └───────────┬──────────────────┘
-        │                 │
-        │           ┌─────┴──────┐
-        │           │            │
-        │           ▼            ▼
-        │    [needs_pyodide] [skip]
-        │           │            │
-        │           ▼            │
-        │  ┌─────────────────┐  │
-        │  │generate_pyodide_│  │  Generate pandas analysis code
-        │  │    analysis     │  │
-        │  └────────┬────────┘  │
-        │           │            │
-        │           └────┬───────┘
-        │                ▼
-        │           ┌───────────────┐
-        │           │generate_      │
-        │           │  response     │  Format natural language answer
-        │           └───────┬───────┘  (Temperature: 0.7 - conversational)
-        │                   │
-        └───────────────────┤
-                            ▼
-                         ┌─────┐
-                         │ END │
-                         └─────┘
+      ┌─────┴──────┐ (check_query_validation)
+      │            │
+  ┌───▼───┐    ┌───▼───────┐
+  │[retry]│    │[fallback] │  sql_retry_count >= 3
+  │       │    │           │  AND !pyodide_fallback_attempted
+  └───┬───┘    └─────┬─────┘
+      │              │
+      │              ▼
+      │        ┌─────────────────────┐
+      │        │enable_pyodide_      │  Set needs_pyodide=True
+      │        │    fallback         │  Reset sql_retry_count=0
+      │        └──────────┬──────────┘  Clear query errors
+      │                   │
+      └───────────────────┘
+                          │
+                          ▼ (both retry paths lead back to generate_SQL)
+
+      ┌──────────────────────────────┐
+      │     [success]                │  No errors OR max retries exceeded
+      └──────────┬───────────────────┘  with fallback already attempted
+                 │
+                 ▼
+      ┌──────────────────────────────┐
+      │visualisation_request_        │
+      │      classification          │  Determine if chart is needed
+      └───────────┬──────────────────┘  (Temperature: 0.0 - strict)
+                  │
+            ┌─────┴──────┐ (check_pyodide_classification)
+            │            │
+            ▼            ▼
+   [needs_pyodide]   [skip]
+            │            │
+            ▼            │
+   ┌─────────────────┐  │
+   │generate_pyodide_│  │  Generate pandas analysis code
+   │    analysis     │  │  (Injects CSV data)
+   └────────┬────────┘  │
+            │            │
+            └────┬───────┘
+                 ▼
+            ┌───────────────┐
+            │generate_      │
+            │  response     │  Format natural language answer
+            └───────┬───────┘  (Temperature: 0.7 - conversational)
+                    │
+                    ▼
+                 ┌─────┐
+                 │ END │
+                 └─────┘
 ```
 
-### Retry Mechanism (Updated 2026-01-09)
+### Retry Mechanism (Updated 2026-01-11)
 
-**Before:** Validation errors caused workflow termination without retry.
+**Evolution:**
+- **Before (2026-01-08):** Validation errors caused workflow termination without retry.
+- **After (2026-01-09):** Validation errors stored in `query_result` and trigger retry loop.
+- **After (2026-01-11):** Added Pyodide fallback mechanism and dedicated retry counter to prevent token overflow.
 
-**After:** Validation errors are stored in `query_result` and trigger the retry loop.
+**Current Flow:**
 
 ```
 generate_SQL
     ↓
-    LLM generates SQL
+    LLM generates SQL (simple if needs_pyodide=True, complex otherwise)
     ↓
 validate_sql_query() (validation.py)
     ↓
-┌─ PASS → execute_SQL → Success
+┌─ PASS → execute_SQL → PostgreSQL execution
+│           ↓
+│       ┌─ Success → check_query_validation → "success" → visualisation
+│       │
+│       └─ SQL Error → query_result="Error: ..."
+│                      sql_retry_count++
+│                      ↓
+│                  check_query_validation
+│                      ↓
+│                  ┌─ sql_retry_count < 3 → "retry" → generate_SQL (with feedback)
+│                  │
+│                  └─ sql_retry_count >= 3 (AND !pyodide_fallback_attempted)
+│                                          → "fallback" → enable_pyodide_fallback
+│                                                         ↓
+│                                                     Set needs_pyodide=True
+│                                                     Reset sql_retry_count=0
+│                                                     Clear query_result
+│                                                         ↓
+│                                                     generate_SQL (simple SQL mode)
 │
-└─ FAIL → Error stored in query_result + messages
-              ↓
-          execute_SQL (skips execution if error present)
-              ↓
-          check_query_validation (detects error in query_result)
-              ↓
-          ┌─ retry_count < 3 → generate_SQL (with error feedback)
-          │
-          └─ retry_count >= 3 → Return "Max retries exceeded" error
+└─ FAIL → Error stored in query_result
+          sql_retry_count++
+          ↓
+      execute_SQL (skips execution if error present)
+          ↓
+      check_query_validation (detects error in query_result)
+          ↓
+      ┌─ sql_retry_count < 3 → "retry" → generate_SQL (with error feedback)
+      │
+      └─ sql_retry_count >= 3 (AND !pyodide_fallback_attempted)
+                              → "fallback" → enable_pyodide_fallback
 ```
 
-**Key Improvement:** `messages` array is updated with error to track retry count correctly, preventing infinite retry loops.
+**Key Improvements:**
+1. **Dedicated Counter:** Uses `sql_retry_count` (NOT message array) to prevent token overflow
+2. **Pyodide Fallback:** After 3 SQL failures, switches to simple SQL + Python analysis mode
+3. **Fallback Guard:** `pyodide_fallback_attempted` flag prevents infinite fallback loops
+4. **Targeted Feedback:** `error_feedback.py` provides specific hints based on error type
 
 ---
 
@@ -327,7 +352,10 @@ validate_sql_query() (validation.py)
   2. Execute SQL via SQLAlchemy
   3. Apply PII masking (deterministic, Python-based)
   4. Return JSON result or error message
-- **Retry Limit:** 3 attempts (tracked via `messages` array)
+- **Retry Limit:** 3 attempts (tracked via `sql_retry_count` in state)
+- **Error Handling:**
+  - Validation errors: Skips execution, passes error through
+  - Database errors: Increments `sql_retry_count`, stores error in `query_result`
 
 ### 5. Visualization Request Classification
 - **Node:** `visualisation_request_classification`
@@ -365,27 +393,59 @@ validate_sql_query() (validation.py)
 - **Libraries:** pandas (data manipulation)
 - **Process:**
   1. LLM generates pandas analysis code
-  2. Frontend loads Pyodide runtime
-  3. Execute code in browser sandbox
-  4. Display results in UI
+  2. Data injected as CSV format (not JSON) for efficiency
+  3. Frontend loads Pyodide runtime
+  4. Execute code in browser sandbox
+  5. Display results in UI
 - **Security:** No server-side code execution
+- **Data Format:** CSV string injected directly into Python code to prevent JSON parsing overhead
 
-### 9. Response Generation
+### 9. Pyodide Fallback Mechanism (Updated 2026-01-11) 🆕
+- **Node:** `enable_pyodide_fallback`
+- **Trigger:** After 3 consecutive SQL generation/execution failures
+- **Purpose:** Recover from complex SQL errors by simplifying the query strategy
+- **Process:**
+  1. Set `needs_pyodide=True` to enable simple SQL mode
+  2. Reset `sql_retry_count=0` for fresh retry attempts
+  3. Clear `query_result` and `sql_query` error states
+  4. Set `pyodide_fallback_attempted=True` to prevent infinite loops
+  5. Route back to `generate_SQL` with simplified prompt
+- **Fallback Strategy:**
+  - **Before fallback:** Complex SQL with aggregations, window functions, date operations
+  - **After fallback:** Simple SELECT to fetch raw data, analysis delegated to Pyodide (pandas)
+- **Guard Mechanism:** If fallback also fails after 3 attempts, routes to `generate_response` with error message
+
+### 10. Response Generation
 - **Node:** `generate_response`
 - **LLM Temperature:** 0.7 (natural, varied)
 - **Output Format:** `<answer>` + `<insight>` (XML tags)
 - **PII:** Already masked in data
 - **Streaming:** Real-time response streaming to frontend
 
-### 10. Error Feedback System (feedbacks.py) 🆕
-- **Purpose:** Provide LLM-specific hints for error correction
-- **Functions:**
-  - `get_unknown_tables_feedback()` - Invalid table names
-  - `get_multiple_statements_feedback()` - Semicolon usage
+### 11. Error Feedback System 🆕
+- **Architecture:** Two-layer system for targeted error correction
+  - **feedbacks.py (306 LOC):** Message templates for each error type
+  - **error_feedback.py (114 LOC):** Router that analyzes errors and selects appropriate feedback
+- **Purpose:** Provide LLM-specific hints for error correction during retry attempts
+- **Process:**
+  1. `nodes.py` calls `get_sql_error_feedback(error_message, allowed_tables)`
+  2. `error_feedback.py` analyzes error message (regex matching)
+  3. Routes to appropriate feedback generator in `feedbacks.py`
+  4. Returns targeted hint string to append to SQL generation prompt
+- **Feedback Types (feedbacks.py):**
+  - `get_unknown_tables_feedback()` - Invalid table names (with alias detection)
+  - `get_multiple_statements_feedback()` - Semicolon usage (suggest CTE)
   - `get_sql_comments_feedback()` - Comment removal
-  - `get_forbidden_keyword_feedback()` - Dangerous keywords
-  - `get_column_not_found_feedback()` - Case sensitivity
+  - `get_forbidden_keyword_feedback()` - Dangerous keywords (CREATE, DROP, etc.)
+  - `get_column_not_found_feedback()` - Case sensitivity and quoting rules
+  - `get_division_by_zero_feedback()` - NULLIF usage
+  - `get_datetime_format_feedback()` - Direct casting instead of TO_TIMESTAMP
+  - `get_alias_reference_feedback()` - Alias in same SELECT clause (suggest CTE)
+  - `get_parsing_error_feedback()` - Generic syntax errors (catch-all)
 - **Example:** "Your previous attempt used invalid table 'it'. Use ONLY: customers, orders, products..."
+- **Separation of Concerns:**
+  - **feedbacks.py** stores human-readable messages (easy to modify/translate)
+  - **error_feedback.py** handles error analysis logic (pattern matching)
 
 ---
 
@@ -428,7 +488,7 @@ validate_sql_query() (validation.py)
    → Streaming text response to user
 ```
 
-### Error Retry Flow (Updated 2026-01-09)
+### Error Retry Flow (Updated 2026-01-11)
 
 ```
 1. SQL Generation Attempt #1
@@ -436,14 +496,15 @@ validate_sql_query() (validation.py)
 
 2. Validation Failed
    → Error: "Unknown tables in query: {'it'}"
-   → Stored in query_result + messages (AIMessage)
+   → Stored in query_result
+   → sql_retry_count = 1
 
 3. execute_SQL (Skip)
    → Detects error in query_result → return {} (pass through)
 
 4. check_query_validation
    → is_error_result(query_result) → True
-   → retry_count = 1 (from messages)
+   → sql_retry_count = 1 < 3
    → return "retry"
 
 5. SQL Generation Attempt #2 (with feedback)
@@ -453,6 +514,45 @@ validate_sql_query() (validation.py)
 
 6. Validation Passed
    → execute_SQL → Success
+```
+
+### Pyodide Fallback Flow (Updated 2026-01-11) 🆕
+
+```
+1. SQL Generation Attempts #1, #2, #3
+   → All failed with complex SQL errors (e.g., date function issues)
+   → sql_retry_count = 3
+
+2. check_query_validation
+   → sql_retry_count >= 3
+   → pyodide_fallback_attempted = False
+   → return "fallback"
+
+3. enable_pyodide_fallback
+   → Set needs_pyodide = True
+   → Reset sql_retry_count = 0
+   → Clear query_result = None
+   → Set pyodide_fallback_attempted = True
+
+4. SQL Generation Attempt #4 (Simple SQL Mode)
+   → Uses get_simple_sql_for_pyodide_prompt()
+   → SQL: SELECT "column1", "column2", "dateTime" FROM table
+   → No aggregations, no window functions, no date operations
+
+5. execute_SQL → Success
+   → Raw data fetched: [{"column1": "value", "dateTime": "2024-01-01"}, ...]
+
+6. visualisation_request_classification
+   → check_pyodide_classification
+   → needs_pyodide = True → route to generate_pyodide_analysis
+
+7. generate_pyodide_analysis
+   → Generates pandas code for statistical analysis
+   → Injects CSV data directly into code
+   → Returns ToolMessage with Python code
+
+8. generate_response
+   → Formats final answer with analysis results
 ```
 
 ---
@@ -504,11 +604,12 @@ validate_sql_query() (validation.py)
 ## Module Responsibilities
 
 ### agent/ - LangGraph Workflow
-- **graph.py:** StateGraph definition, conditional edges, retry logic
-- **nodes.py:** Node implementations, LLM calls, error handling
-- **prompts.py:** LLM prompt templates (initial generation)
-- **feedbacks.py:** Error feedback messages (retry corrections)
-- **state.py:** TypedDict schema for state management
+- **graph.py:** StateGraph definition, conditional edges, retry logic, Pyodide fallback routing
+- **nodes.py:** Node implementations, LLM calls, error handling, PII masking
+- **prompts.py:** LLM prompt templates (initial generation, simple/complex SQL modes)
+- **feedbacks.py:** Error feedback messages (306 LOC) - actual feedback strings for each error type
+- **error_feedback.py:** Error feedback router (114 LOC) - analyzes errors and routes to appropriate feedback
+- **state.py:** TypedDict schema for state management (includes fallback flags and retry counters)
 
 ### core/ - Shared Utilities
 - **validation.py:** SQL security checks, table name validation
@@ -611,9 +712,12 @@ validate_sql_query() (validation.py)
 
 ---
 
-**Last Updated:** 2026-01-10
-**Version:** 1.1
+**Last Updated:** 2026-01-11
+**Version:** 1.2
 **Recent Changes:**
-- Workflow restructured: Pyodide classification now runs BEFORE SQL generation
-- Added simple SQL prompt for pyodide-based analysis (no aggregations/functions)
-- Fixed validation.py to skip Function/Parenthesis tokens (prevents false table extraction)
+- Added Pyodide fallback mechanism: Recovers from 3 consecutive SQL failures by switching to simple SQL + Python analysis
+- Introduced dedicated retry counter (`sql_retry_count`) to prevent token overflow from message accumulation
+- Added fallback guard flag (`pyodide_fallback_attempted`) to prevent infinite fallback loops
+- Updated workflow diagram to reflect actual implementation in graph.py
+- CSV data injection for Pyodide analysis (replacing JSON format for efficiency)
+- Enhanced error retry flow documentation with fallback strategy

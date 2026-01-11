@@ -27,15 +27,10 @@ export const PlotlyChart = React.memo(
     console.log("PlotlyChart Rendered", { dataLen: data?.length });
 
     return (
-      <div className="relative z-0 h-full min-h-[400px] w-full rounded-lg border bg-white p-2">
+      <div className="relative z-0 h-full min-h-[400px] w-full rounded-lg border bg-white p-4">
         <Plot
           data={data}
-          layout={{
-            ...layout,
-            autosize: true,
-            margin: { l: 50, r: 20, t: 30, b: 50 },
-            height: 400, // 고정 높이를 명시적으로 주어 리사이징 시 찌그러짐 방지
-          }}
+          layout={layout}
           useResizeHandler={true}
           style={chartStyle}
           config={{

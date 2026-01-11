@@ -31,17 +31,6 @@ from src.agent.prompts import (
     get_pyodide_analysis_prompt,
     get_response_generation_prompt,
 )
-from src.agent.feedbacks import (
-    get_unknown_tables_feedback,
-    get_multiple_statements_feedback,
-    get_sql_comments_feedback,
-    get_forbidden_keyword_feedback,
-    get_column_not_found_feedback,
-    get_parsing_error_feedback,
-    get_division_by_zero_feedback,
-    get_datetime_format_feedback,
-    get_alias_reference_feedback,
-)
 from src.core.logger import setup_logger
 from src.core.db import get_db_engine
 from src.core.validation import validate_sql_query
@@ -397,54 +386,9 @@ def generate_SQL(state: SQLAgentState) -> dict:
             # Get previous error from query_result to generate targeted feedbacks
             previous_error = state.get('query_result', '')
 
-            # Add specific feedbacks based on error type to guide the LLM's correction
-            if 'Unknown tables in query' in previous_error:
-                # Extract invalid table names from error
-                import re
-                match = re.search(r"Unknown tables in query: (\{.*?\})", previous_error)
-                if match:
-                    invalid_tables_str = match.group(1)
-                    # Check if it's a subquery alias issue (single letter or short name)
-                    invalid_tables_set = eval(invalid_tables_str)  # Convert string set to actual set
-                    is_likely_alias = any(len(t) <= 2 for t in invalid_tables_set)
-
-                    # Use feedback module
-                    sql_prompt += get_unknown_tables_feedback(
-                        invalid_tables=invalid_tables_set,
-                        allowed_tables=allowed_tables,
-                        is_likely_alias=is_likely_alias
-                    )
-
-            elif 'Multiple SQL statements not allowed' in previous_error:
-                sql_prompt += get_multiple_statements_feedback()
-
-            elif 'SQL comments not allowed' in previous_error:
-                sql_prompt += get_sql_comments_feedback()
-
-            elif 'Forbidden SQL keyword: CREATE' in previous_error:
-                sql_prompt += get_forbidden_keyword_feedback('CREATE')
-
-            elif 'column' in previous_error.lower() and 'does not exist' in previous_error.lower():
-                # Check if it's an alias reference issue (UndefinedColumn)
-                import re
-                match = re.search(r'column "(.+?)" does not exist', previous_error)
-                if match:
-                    column = match.group(1)
-                    # If the column is NOT in allowed_tables, it's likely an alias
-                    # (Simplified check: just provide the alias feedback as a hint)
-                    sql_prompt += get_alias_reference_feedback(column)
-                else:
-                    sql_prompt += get_column_not_found_feedback()
-
-            elif 'division by zero' in previous_error.lower():
-                sql_prompt += get_division_by_zero_feedback()
-
-            elif 'datetime' in previous_error.lower() and 'format' in previous_error.lower():
-                 sql_prompt += get_datetime_format_feedback()
-
-            else:
-                # Catch-all for other SQL errors (GroupingError, SyntaxError, etc.)
-                sql_prompt += get_parsing_error_feedback(previous_error)
+            # Use error feedback router to get targeted guidance
+            from src.agent.error_feedback import get_sql_error_feedback
+            sql_prompt += get_sql_error_feedback(previous_error, allowed_tables)
 
             logger.info(f"Retry {retry_count}: Added specific feedback for error type")
 
@@ -611,8 +555,28 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
             logger.warning(f"Invalid chart type '{chart_type}', using 'bar'")
             chart_type = 'bar'
 
+        # Generate chart title using LLM (token-optimized)
+        chart_title = None
+        try:
+            from src.agent.prompts import get_chart_title_prompt
+            
+            title_prompt = get_chart_title_prompt(user_question, chart_type)
+            title_response = llm_vis.invoke(title_prompt)
+            chart_title = title_response.content.strip()
+            
+            # Validate title length
+            if len(chart_title) > 60:
+                logger.warning(f"Chart title too long ({len(chart_title)} chars), truncating")
+                chart_title = chart_title[:57] + "..."
+            
+            logger.info(f"Generated chart title: {chart_title}")
+        except Exception as e:
+            # Fallback to rule-based title generation if LLM fails
+            logger.warning(f"Failed to generate chart title via LLM: {e}, using fallback")
+            chart_title = None
+
         # sql_result is already PII-masked by execute_SQL node
-        plotly_data = create_plotly_chart(sql_result, chart_type, user_question)
+        plotly_data = create_plotly_chart(sql_result, chart_type, title=chart_title, user_question=user_question)
 
         if plotly_data is None:
             return {"plotly_data": None}
@@ -630,8 +594,19 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         logger.warning("Failed to parse LLM response as JSON")
         return {"plotly_data": None}
 
-def create_plotly_chart(sql_result, chart_type, user_question=""):
-    """Generate Plotly chart JSON from SQL results with proper titles and labels"""
+def create_plotly_chart(sql_result, chart_type, title=None, user_question=""):
+    """
+    Generate Plotly chart JSON from SQL results with proper titles and labels.
+    
+    Args:
+        sql_result: JSON string of SQL query results
+        chart_type: Type of chart ('bar', 'line', 'pie')
+        title: Pre-generated chart title (from LLM). If None, generates from user_question
+        user_question: User's original question (fallback for title generation)
+        
+    Returns:
+        JSON string with Plotly chart specification
+    """
     try:
         sql_list = json.loads(sql_result)
     except json.JSONDecodeError:
@@ -655,9 +630,13 @@ def create_plotly_chart(sql_result, chart_type, user_question=""):
     x_label = columns[0] if len(columns) >= 1 else "Category"
     y_label = columns[-1] if len(columns) >= 1 else "Value"
 
-    # Generate chart title from user question
-    if user_question:
-        # Clean up common phrases
+    # Use LLM-generated title if available, otherwise fallback to extraction
+    if title:
+        # LLM-generated title (already clean and professional)
+        logger.debug(f"Using LLM-generated title: {title}")
+    elif user_question:
+        # Fallback: Extract from user question (rule-based)
+        logger.debug("Using fallback title generation from user_question")
         title = user_question.replace("show me", "").replace("Show me", "")
         title = title.replace("create a chart", "").replace("Create a chart", "")
         title = title.replace("create a bar chart", "").replace("Create a bar chart", "")
@@ -685,7 +664,9 @@ def create_plotly_chart(sql_result, chart_type, user_question=""):
         if title:
             title = title[0].upper() + title[1:]
     else:
+        # Last fallback: generic title from column names
         title = f"{y_label} by {x_label}"
+        logger.debug(f"Using generic title: {title}")
 
     x_data = []
     y_data = []

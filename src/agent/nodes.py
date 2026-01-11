@@ -53,7 +53,6 @@ from src.agent.config import (
     llm_vis,
     llm_response,
     llm,
-    MAX_RETRY_COUNT,
     VALID_CHART_TYPES
 )
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
@@ -248,9 +247,8 @@ def generate_SQL(state: SQLAgentState) -> dict:
             logger.info("Using complex SQL prompt for direct analysis")
             sql_prompt = get_sql_generation_prompt(schema_info, user_question)
 
-        # Check if this is a retry (look for previous errors in message history)
-        messages = state.get('messages', [])
-        retry_count = sum(1 for msg in messages if 'Error:' in str(getattr(msg, 'content', '')))
+        # Check if this is a retry (use dedicated counter)
+        retry_count = state.get('sql_retry_count', 0) or 0
 
         if retry_count > 0:
             # Get previous error from query_result to generate targeted feedbacks

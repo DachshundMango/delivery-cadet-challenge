@@ -12,7 +12,6 @@ from src.agent.config import (
     llm_vis,
     llm_response,
     llm,
-    MAX_RETRY_COUNT,
     MAX_SQL_RETRIES,
     VALID_CHART_TYPES,
     LLM_MODEL,
@@ -65,17 +64,9 @@ class TestLLMInstances:
 class TestConfigurationConstants:
     """Test suite for workflow configuration constants."""
     
-    def test_max_retry_count_value(self):
-        """MAX_RETRY_COUNT should be set to 3."""
-        assert MAX_RETRY_COUNT == 3
-    
     def test_max_sql_retries_value(self):
         """MAX_SQL_RETRIES should be set to 3."""
         assert MAX_SQL_RETRIES == 3
-    
-    def test_max_retry_values_are_consistent(self):
-        """MAX_RETRY_COUNT and MAX_SQL_RETRIES should match."""
-        assert MAX_RETRY_COUNT == MAX_SQL_RETRIES
     
     def test_valid_chart_types_contains_bar(self):
         """Valid chart types should include 'bar'."""

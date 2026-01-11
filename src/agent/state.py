@@ -17,6 +17,8 @@ class SQLAgentState(TypedDict):
 		query_result: JSON string of query results or error message starting with "Error:"
 		plotly_data: JSON string containing Plotly chart specification (not dict!)
 		needs_pyodide: Whether Pyodide (Python) analysis is required
+		pyodide_fallback_attempted: Whether Pyodide fallback has been attempted after SQL failures
+		sql_retry_count: Counter for SQL generation/execution failures (prevents token overflow)
 		messages: List of messages accumulated via operator.add
 			- HumanMessage: User input
 			- AIMessage: LLM responses
@@ -37,6 +39,8 @@ class SQLAgentState(TypedDict):
 
 	plotly_data: Optional[str]  # JSON string, NOT dict!
 	needs_pyodide: Optional[bool]
+	pyodide_fallback_attempted: Optional[bool]  # Prevents infinite fallback loop
+	sql_retry_count: Optional[int]  # Counter for SQL failures (prevents token overflow)
 
 	messages: Annotated[List[BaseMessage], operator.add]
 

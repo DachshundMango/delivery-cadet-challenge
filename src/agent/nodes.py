@@ -482,12 +482,12 @@ def generate_SQL(state: SQLAgentState) -> dict:
         logger.error(f"SQL validation failed: {e}")
         logger.debug(f"Failed SQL query: {sql_query if 'sql_query' in locals() else 'N/A'}")
 
-        # Return error in query_result AND messages so retry logic can process it
-        # messages is needed for retry_count tracking
+        # Increment retry counter (NOT messages - prevents token overflow)
+        current_retry = state.get('sql_retry_count', 0) or 0
         return {
             "sql_query": sql_query if 'sql_query' in locals() else None,
             "query_result": error_msg,
-            "messages": [AIMessage(content=error_msg)]
+            "sql_retry_count": current_retry + 1
         }
 
     except (SchemaLoadError, ValidationError) as e:
@@ -517,22 +517,11 @@ def execute_SQL(state: SQLAgentState) -> dict:
     sql_query = state.get('sql_query')
     query_result = state.get('query_result')
 
-    # Calculate retry count first
-    messages = state.get('messages', [])
-    retry_count = sum(1 for msg in messages
-                      if 'Error:' in str(getattr(msg, 'content', '')))
+    # Get retry count from dedicated counter (NOT messages - prevents token overflow)
+    retry_count = state.get('sql_retry_count', 0) or 0
 
     # If query_result already has an error (from validation failure), pass it through
     if query_result and 'Error:' in query_result:
-        # Check retry limit only if we are still in error state
-        if retry_count >= MAX_RETRY_COUNT:
-            error_msg = f"Error: Maximum retry limit ({MAX_RETRY_COUNT}) exceeded. Query failed."
-            logger.error(f"Max retries exceeded for query: {sql_query}")
-            return {
-                "query_result": error_msg,
-                "messages": [AIMessage(content=error_msg)]
-            }
-
         logger.info("Skipping execution - validation error already in query_result")
         return {}  # Don't overwrite query_result, just pass through
 
@@ -563,7 +552,7 @@ def execute_SQL(state: SQLAgentState) -> dict:
         logger.warning(f"Database error: {e}")
         return {
             "query_result": error_msg,
-            "messages": [AIMessage(content=error_msg)]
+            "sql_retry_count": retry_count + 1
         }
 
     except Exception as e:
@@ -572,7 +561,7 @@ def execute_SQL(state: SQLAgentState) -> dict:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         return {
             "query_result": error_msg,
-            "messages": [AIMessage(content=error_msg)]
+            "sql_retry_count": retry_count + 1
         }
 
 def visualisation_request_classification(state: SQLAgentState) -> dict:
@@ -873,6 +862,34 @@ csv_data = {repr(csv_data)}
     
     return {
         "messages": [tool_message]
+    }
+
+
+def enable_pyodide_fallback(state: SQLAgentState) -> dict:
+    """
+    Enable Pyodide fallback mode after complex SQL failures.
+    
+    This node is triggered when SQL generation/execution fails 3 times.
+    It resets the error state and forces simple SQL generation for Pyodide analysis.
+    
+    Args:
+        state: Current workflow state
+        
+    Returns:
+        Dictionary with needs_pyodide=True, fallback flag, reset counter, and cleared error
+        
+    Node Position: execute_SQL[3x failure] → enable_pyodide_fallback → generate_SQL
+    """
+    user_question = state.get('user_question', '')
+    logger.warning(f"Enabling Pyodide fallback for question: {user_question[:50]}...")
+    logger.info("Complex SQL failed 3 times. Switching to simple SQL + Pyodide analysis.")
+    
+    return {
+        "needs_pyodide": True,
+        "pyodide_fallback_attempted": True,
+        "query_result": None,  # Clear error state to allow re-execution
+        "sql_query": None,     # Clear previous failed query
+        "sql_retry_count": 0   # Reset retry counter for fresh start
     }
 
 

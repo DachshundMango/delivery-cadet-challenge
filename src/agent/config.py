@@ -59,5 +59,6 @@ llm_response = ChatOpenAI(
 llm = llm_sql
 
 # Workflow configuration constants
-MAX_RETRY_COUNT = 3
+MAX_RETRY_COUNT = 3  # Used internally by nodes (deprecated name, use MAX_SQL_RETRIES)
+MAX_SQL_RETRIES = 3  # Used by routing logic
 VALID_CHART_TYPES = {'bar', 'line', 'pie'}

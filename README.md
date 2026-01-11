@@ -35,30 +35,9 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 
 ## Tech Stack
 
-### Backend
-- **Python 3.x**: Core programming language
-- **LangGraph**: State-based workflow orchestration
-- **LangChain**: LLM framework and tooling
-- **Groq**: High-performance LLM inference (llama-3.1-8b-instant)
-- **PostgreSQL 15**: Primary database
-- **SQLAlchemy**: Database ORM and query builder
-- **Plotly**: Interactive data visualisation library
-- **FastAPI**: Web server (via LangGraph)
-- **LangSmith**: Execution trace visualisation
-
-### Frontend
-- **Next.js 15**: React meta-framework (App Router)
-- **React 19**: UI library
-- **TypeScript**: Type safety
-- **Tailwind CSS 4**: Styling
-- **Radix UI**: Accessible component library
-- **Plotly.js & React-Plotly.js**: Interactive charting library
-- **Pyodide & react-py**: In-browser Python runtime with pandas support
-- **Framer Motion**: Animations
-
-### Infrastructure
-- **Docker Compose**: PostgreSQL and PgAdmin containers
-- **LangGraph Server**: Agent runtime environment
+- **Backend**: Python 3.x, LangGraph, Cerebras (llama-3.3-70b), PostgreSQL 15, SQLAlchemy, Plotly
+- **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS, Pyodide (in-browser Python)
+- **Infrastructure**: Docker Compose, LangGraph Server
 
 ## Prerequisites
 
@@ -66,7 +45,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - Node.js 18+
 - Docker & Docker Compose
 - pnpm (or npm/yarn)
-- Groq API key (free tier available at [GroqCloud](https://console.groq.com))
+- Cerebras API key (free tier available at [Cerebras Cloud](https://cloud.cerebras.ai))
 - LangSmith API key (free tier available at [LangSmith](https://smith.langchain.com))
 
 ## Installation & Setup
@@ -83,8 +62,8 @@ cd cadet
 Create a `.env` file in the root directory:
 
 ```bash
-# Groq API Key
-GROQ_API_KEY=your_groq_api_key_here
+# Cerebras API Key
+CEREBRAS_API_KEY=your_cerebras_api_key_here
 
 # LangSmith Settings (Required for trace visualisation)
 LANGCHAIN_TRACING_V2=true
@@ -162,141 +141,40 @@ The script pauses for user input when needed and provides clear progress updates
 
 ### Manual Setup (Step-by-Step)
 
-If you prefer to run each step individually:
+If you prefer to run each step individually, the data pipeline consists of:
 
-### Data Pipeline Workflow
+1. **profiler** - Analyze CSV files → generates `data_profile.json`
+2. **relationship_discovery** - Configure PK/FK relationships → generates `keys.json`
+3. **load_data** - Load CSV data to PostgreSQL with constraints
+4. **integrity_checker** - Validate data integrity (optional)
+5. **transform_data** - Fix issues via interactive SQL console (if needed)
+6. **generate_schema** - Generate schema metadata + PII detection → generates `schema_info.json`
 
-```
-┌─────────────────┐
-│   CSV Files     │  Raw data in data/ directory
-│   (data/*.csv)  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  1. profiler.py     │  Analyze CSV structure and statistics
-└──────────┬──────────┘
-           │
-           │ Generates data_profile.json
-           ▼
-┌──────────────────────────────┐
-│ 2. relationship_discovery.py │  Suggest PK/FK relationships
-└───────────┬──────────────────┘
-            │
-            │ Generates keys.json (inferred)
-            ▼
-┌───────────────────────────┐
-│ 3. integrity_checker.py   │  Validate data integrity (optional)
-└────────────┬──────────────┘
-             │
-             │ Reports FK violations, PK duplicates
-             ▼
-┌─────────────────┐
-│ 4. load_data.py │  Load CSV → PostgreSQL
-└────────┬────────┘
-         │
-         │ Creates tables + applies constraints
-         ▼
-┌──────────────────────┐
-│ 5. transform_data.py │  Fix integrity issues (if needed)
-└──────────┬───────────┘
-           │
-           │ Interactive SQL console
-           │ Updates keys.json from DB
-           │ Verifies FK relationships
-           ▼
-┌─────────────────────────┐
-│ 6. generate_schema.py   │  Generate schema metadata + PII detection
-└──────────┬──────────────┘
-           │
-           │ Generates:
-           │  - schema_info.json (for LLM)
-           │  - schema_info.md (docs)
-           │  - PII column mapping
-           ▼
-┌──────────────────┐
-│  SQL Agent Ready │  System ready to accept queries
-└──────────────────┘
-```
+For detailed workflow diagrams and explanations, see the [Architecture Guide](docs/ARCHITECTURE.md).
 
-### Step 1: Profile the Data
+Run each command individually if you need more control:
 
 ```bash
+# Step 1: Profile CSV files
 python -m src.data_pipeline.profiler
-```
 
-This generates `src/config/data_profile.json` with statistics about each CSV file.
-
-### Step 2: Discover Relationships
-
-```bash
+# Step 2: Discover relationships
 python -m src.data_pipeline.relationship_discovery
-```
 
-This suggests potential foreign key relationships based on column names and data patterns, generating `src/config/keys.json`.
-
-### Step 3: (Optional) Check Data Integrity
-
-```bash
+# Step 3: (Optional) Check data integrity
 python -m src.data_pipeline.integrity_checker
-```
 
-Validates data **before** loading to database:
-- Primary key violations (duplicates, NULLs)
-- Foreign key violations (orphaned records)
-- Systematic offset detection (e.g., ID mismatches across tables)
-
-### Step 4: Load Data into Database
-
-```bash
+# Step 4: Load data to PostgreSQL
 python -m src.data_pipeline.load_data
-```
 
-This script:
-- Creates tables from CSV files
-- Applies primary and foreign key constraints from `src/config/keys.json`
-- Loads data into PostgreSQL
-
-### Step 5: Transform Data (If Needed)
-
-```bash
+# Step 5: (If needed) Fix issues via interactive SQL console
 python -m src.data_pipeline.transform_data
-```
 
-**Interactive SQL console** for fixing integrity issues:
-
-```sql
-SQL> UPDATE "orders" SET "customerId" = "customerId" - 1000000;
-Query executed: 1500 rows affected
-SQL> UPDATE "reviews" SET "franchiseId" = "franchiseId" - 1000000;
-Query executed: 800 rows affected
-SQL> done
-```
-
-After typing `done`, the script automatically:
-1. Updates `keys.json` from actual database constraints
-2. Verifies all FK relationships
-3. Reports any remaining integrity issues
-
-### Step 6: Generate Schema + Detect PII
-
-```bash
+# Step 6: Generate schema + detect PII
 python -m src.data_pipeline.generate_schema
 ```
 
-This script:
-1. Generates schema metadata from database
-2. **Uses LLM to detect PII columns** (e.g., customer names, reviewer names)
-3. Displays color-coded report for user verification:
-   - 🔴 `[PII]` - Personal information (will be masked)
-   - 🟢 `[SAFE]` - Non-sensitive data
-4. Saves configuration to `src/config/schema_info.json`
-
-**Creates:**
-- `src/config/schema_info.json`: Complete schema + PII column mapping (used by SQL Agent)
-- `src/config/schema_info.md`: Human-readable documentation
-
-**PII Masking**: Personal names are automatically replaced with `Person #1`, `Person #2`, etc. at runtime to protect privacy.
+**Note**: Step 6 uses LLM to detect PII columns and displays a color-coded report for verification. Personal names are automatically masked as `Person #N` at runtime.
 
 ## Running the Application
 
@@ -353,209 +231,6 @@ python3 src/cli.py
 
 Interactive command-line interface for testing the agent directly.
 
-## Project Structure
-
-```
-cadet/
-├── src/                          # Python backend source code
-│   ├── agent/                    # LangGraph agent workflow
-│   │   ├── __init__.py           # Public API exports
-│   │   ├── graph.py              # LangGraph workflow definition
-│   │   ├── nodes.py              # Agent node implementations
-│   │   └── state.py              # State management schema
-│   │
-│   ├── data_pipeline/            # ETL and data preparation
-│   │   ├── __init__.py           # Public API exports
-│   │   ├── profiler.py           # CSV data profiler
-│   │   ├── relationship_discovery.py  # Automatic FK detection
-│   │   ├── integrity_checker.py  # Data validation utilities
-│   │   ├── load_data.py          # CSV to DB ETL pipeline
-│   │   ├── transform_data.py     # Interactive data transformation
-│   │   ├── pii_discovery.py      # LLM-based PII column detection
-│   │   └── generate_schema.py    # Schema + PII metadata generator
-│   │
-│   ├── core/                     # Shared utilities
-│   │   ├── __init__.py           # Public API exports
-│   │   ├── console.py            # Unified CLI output formatting
-│   │   ├── db.py                 # Database connection management
-│   │   ├── logger.py             # Logging configuration
-│   │   ├── errors.py             # Custom exception classes
-│   │   └── validation.py         # Input validation utilities
-│   │
-│   ├── config/                   # Configuration and metadata
-│   │   ├── keys.json             # PK/FK metadata configuration
-│   │   ├── schema_info.json      # Generated schema (used by LLM)
-│   │   ├── schema_info.md        # Human-readable schema docs
-│   │   └── data_profile.json     # Data profiling statistics
-│   │
-│   ├── setup.py                  # Automated pipeline orchestrator
-│   ├── reset_db.py               # Database + config reset utility
-│   └── cli.py                    # CLI entry point
-│
-├── frontend/                     # Next.js frontend
-│   ├── src/
-│   │   ├── app/                  # Next.js App Router
-│   │   ├── components/           # React components
-│   │   ├── providers/            # Context providers & LangGraph client
-│   │   └── hooks/                # Custom React hooks
-│   ├── package.json
-│   └── tailwind.config.js
-│
-├── data/                         # CSV data files
-│   ├── sales_customers.csv
-│   ├── sales_franchises.csv
-│   ├── sales_suppliers.csv
-│   ├── sales_transactions.csv
-│   ├── media_customer_reviews.csv
-│   └── media_gold_reviews_chunked.csv
-│
-├── docker-compose.yaml           # PostgreSQL + PgAdmin
-├── langgraph.json                # LangGraph configuration
-├── start.sh                      # One-command startup script
-├── environment.yml               # Conda environment (cross-platform)
-├── requirements.txt              # Python dependencies (pip)
-├── .env                          # Environment variables (create this)
-└── README.md                     # This file
-```
-
-## How It Works
-
-### LangGraph Workflow
-
-```
-┌─────────────┐
-│    START    │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────┐
-│ read_question   │  Extract user question
-└────────┬────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ intent_classification│  Classify as "sql" or "general"
-└──────────┬───────────┘
-           │
-    ┌──────┴──────┐
-    │             │
-    ▼             ▼
-┌───────────┐  ┌─────────────────────────┐
-│generate_  │  │generate_general_response│
-│   SQL     │  └───────────┬─────────────┘
-└─────┬─────┘              │
-      │                    │
-      ▼                    ▼
-┌───────────┐           ┌─────┐
-│execute_SQL│           │ END │
-└─────┬─────┘           └─────┘
-      │
-  ┌───┴───┐
-  │ Error?│
-  └───┬───┘
-      │
-  ┌───┴───────┐
-  │           │
-  ▼           ▼
-[retry]   [success]
-  │           │
-  │           ▼
-  │     ┌──────────────────────────────┐
-  │     │visualisation_request_        │
-  │     │      classification          │  Determine if chart needed
-  │     └───────────┬──────────────────┘
-  │                 │
-  │                 ▼
-  │     ┌──────────────────────────────┐
-  │     │pyodide_request_              │
-  │     │      classification          │  Check if Python analysis needed
-  │     └───────────┬──────────────────┘
-  │                 │
-  │           ┌─────┴──────┐
-  │           │            │
-  │           ▼            ▼
-  │    [needs_pyodide] [skip]
-  │           │            │
-  │           ▼            │
-  │  ┌─────────────────┐  │
-  │  │generate_pyodide_│  │
-  │  │    analysis     │  │
-  │  └────────┬────────┘  │
-  │           │            │
-  │           └────┬───────┘
-  │                ▼
-  │           ┌───────────────┐
-  │           │generate_      │
-  │           │  response     │
-  │           └───────┬───────┘
-  │                   │
-  └───────────────────┤
-                      ▼
-                   ┌─────┐
-                   │ END │
-                   └─────┘
-```
-
-### Key Components
-
-1. **Intent Classification**: Determines if the user wants data (SQL) or conversation (general)
-2. **SQL Generation**: Uses LLM to convert natural language to PostgreSQL queries
-3. **Query Execution**: Runs SQL against the database and handles errors
-4. **Visualisation Request Classification**: Analyses query results and determines if visual representation is needed
-5. **Chart Generation**: Creates interactive Plotly charts (bar, line, pie) from SQL results
-6. **Pyodide Request Classification**: Checks user question for analysis keywords (correlation, statistics, describe, etc.)
-7. **Conditional Pyodide Execution**: Only generates Python code when advanced analysis is explicitly requested
-8. **In-Browser Python Execution**: Executes pandas-based Python code using Pyodide in the browser
-9. **Response Generation**: Converts SQL results into natural language
-10. **Retry Logic**: Automatically regenerates queries on errors
-
-### Dataset-Agnostic Design
-
-The system loads schema information from `schema_info.json` at runtime, meaning:
-- No hardcoded table or column names in prompts
-- Easy to swap datasets by updating `keys.json` and re-running the data pipeline
-- Schema metadata is automatically injected into LLM prompts
-
-## Configuration
-
-### Changing the Database
-
-1. Place new CSV files in the `data/` directory
-2. Edit `src/config/keys.json` to define primary and foreign keys:
-
-```json
-{
-  "table_name": {
-    "pk": "primary_key_column",
-    "fks": [
-      {
-        "col": "foreign_key_column",
-        "ref_table": "referenced_table",
-        "ref_col": "referenced_column"
-      }
-    ]
-  }
-}
-```
-
-3. Run the data pipeline:
-```bash
-python -m src.data_pipeline.load_data
-python -m src.data_pipeline.generate_schema
-```
-
-### Changing the LLM Model
-
-Edit `src/agent/nodes.py` line 31:
-
-```python
-# Current: llama-3.1-8b-instant
-llm = ChatGroq(model='llama-3.1-8b-instant')
-
-# Alternative: llama-3.3-70b-versatile
-# llm = ChatGroq(model='llama-3.3-70b-versatile')
-```
-
 ## Example Queries
 
 ### Easy (Single Table)
@@ -578,31 +253,6 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 - "Calculate the running cumulative revenue per day."
 - "For each transaction, calculate how its total price compares to the average transaction value for that franchise."
 
-## Technology Choices & Justification
-
-### Why PostgreSQL?
-- Robust support for complex joins and window functions
-- Better performance for analytic queries than SQLite
-- Production-ready with ACID compliance
-- Docker makes setup trivial
-
-### Why Groq?
-- Extremely fast inference speed (important for real-time chat)
-- Free tier with generous limits
-- Excellent SQL generation capabilities with llama-3.1-8b-instant
-
-### Why LangGraph?
-- State-based workflow management ideal for multi-step agents
-- Built-in support for conditional edges (intent routing, retry logic)
-- Native LangSmith integration for debugging
-- Production-ready with streaming support
-
-### Why Next.js?
-- Server components for optimised performance
-- Built-in API routes for proxy layer
-- Excellent TypeScript support
-- App Router provides modern React patterns
-
 ## Limitations & Future Improvements
 
 ### Current Limitations
@@ -621,7 +271,7 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
    - Requires manual verification via color-coded report
    - Can be manually adjusted by editing `schema_info.json`
 
-4. **Single LLM Dependency**: If Groq API is down, entire system fails
+4. **Single LLM Dependency**: If Cerebras API is down, entire system fails
    - No fallback mechanism
 
 5. **No Query Caching**: Identical queries are re-executed each time
@@ -671,78 +321,26 @@ llm = ChatGroq(model='llama-3.1-8b-instant')
 If you want to start completely fresh:
 
 ```bash
-# Option 1: Using start.sh
 ./start.sh --reset
-
-# Option 2: Manual reset
-python src/reset_db.py
-python src/setup.py
 ```
 
-This will:
-- Drop all database tables
-- Delete all config files (keys.json, schema_info.json, data_profile.json)
-- Re-run the entire pipeline
+This will drop all database tables, delete config files, and re-run the entire pipeline.
 
-### Database Connection Errors
+### Common Issues
 
-```bash
-# Check if PostgreSQL is running
-docker-compose ps
+- **Schema not found**: Run `python src/setup.py`
+- **Database connection error**: Check if PostgreSQL is running with `docker-compose ps`
+- **Port conflict**: Edit `langgraph.json` to use a different port
 
-# Restart PostgreSQL
-docker-compose restart db
-
-# View logs
-docker-compose logs db
-```
-
-### Schema Not Found Error
-
-```
-FileNotFoundError: schema_info.json not found
-```
-
-**Solution**: Run the automated setup:
-```bash
-python src/setup.py
-```
-
-Or run generate_schema manually:
-```bash
-python -m src.data_pipeline.generate_schema
-```
-
-### LangGraph Server Port Conflict
-
-If port 2024 is already in use:
-
-Edit `langgraph.json` or run:
-```bash
-langgraph up --port 8000
-```
-
-Then update frontend `.env.local`:
-```
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-### Frontend Connection Issues
-
-Check that `frontend/.env.local` exists with:
-```
-NEXT_PUBLIC_API_URL=http://localhost:2024
-NEXT_PUBLIC_ASSISTANT_ID=agent
-```
+For detailed troubleshooting, see the [Development Guide](docs/DEVELOPMENT.md#troubleshooting).
 
 ## Documentation
 
-For developers and contributors:
+For detailed system documentation and developer guides, see the [docs/](docs/) folder:
 
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design, LangGraph workflow, project structure, and component details
 - **[Error Handling Guide](docs/ERROR-HANDLING.md)** - SQL validation, error types, retry mechanism, and debugging
-- **[Architecture Guide](docs/ARCHITECTURE.md)** - System design, LangGraph workflow, and component details
-- **[Development Guide](docs/DEVELOPMENT.md)** - Setup, contributing, testing, and common tasks
-- **[SQL Reference](docs/sql.md)** - SQL patterns and examples
+- **[Development Guide](docs/DEVELOPMENT.md)** - Development setup, contributing, testing, and common tasks
 
 ## License
 
@@ -752,4 +350,4 @@ This project is developed as part of the Delivery Cadet Challenge 2026.
 
 - Built with [LangGraph](https://github.com/langchain-ai/langgraph) by LangChain
 - UI template based on [LangGraph Agent Chat UI](https://github.com/langchain-ai/agent-chat-ui)
-- Powered by [Groq](https://groq.com/) for fast LLM inference
+- Powered by [Cerebras](https://cerebras.ai/) for fast LLM inference

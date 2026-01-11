@@ -20,7 +20,6 @@ import json
 import csv
 import io
 from typing import Optional
-from dotenv import load_dotenv
 from src.agent.state import SQLAgentState
 from src.agent.prompts import (
     get_intent_classification_prompt,
@@ -32,7 +31,6 @@ from src.agent.prompts import (
     get_response_generation_prompt,
 )
 from src.core.logger import setup_logger
-from src.core.db import get_db_engine
 from src.core.validation import validate_sql_query
 from src.core.errors import (
     ValidationError,
@@ -40,161 +38,30 @@ from src.core.errors import (
     SchemaLoadError,
     LLMError
 )
+from src.agent.helpers import (
+    get_cached_engine,
+    load_schema_info,
+    apply_pii_masking,
+    SCHEMA_JSON_PATH
+)
+from src.agent.config import (
+    llm_intent,
+    llm_sql,
+    llm_vis,
+    llm_response,
+    llm,
+    MAX_RETRY_COUNT,
+    VALID_CHART_TYPES
+)
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
 from sqlalchemy import create_engine, text, Engine
 from sqlalchemy.exc import SQLAlchemyError
 import plotly.express as px
 
-# Automatically find .env file in the project root and load environment variables
-load_dotenv()
+# Setup logger
 logger = setup_logger('cadet.nodes')
-
-# LLM configuration
-LLM_MODEL = os.getenv('LLM_MODEL', 'llama-3.3-70b')
-CEREBRAS_API_KEY = os.getenv('CEREBRAS_API_KEY')
-CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
-
-# Task-specific LLMs with optimized temperature settings (using Cerebras via OpenAI-compatible API)
-llm_intent = ChatOpenAI(model=LLM_MODEL, temperature=0.0, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)    # Intent classification: deterministic
-llm_sql = ChatOpenAI(model=LLM_MODEL, temperature=0.1, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)       # SQL generation: accurate & safe
-llm_vis = ChatOpenAI(model=LLM_MODEL, temperature=0.0, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)       # Visualization: deterministic (strict keyword detection)
-llm_response = ChatOpenAI(model=LLM_MODEL, temperature=0.7, api_key=CEREBRAS_API_KEY, base_url=CEREBRAS_BASE_URL)  # Response: natural & varied
-
-# Default LLM (for backward compatibility)
-llm = llm_sql
-
-# File paths
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SRC_DIR = os.path.join(BASE_DIR, 'src')
-SCHEMA_JSON_PATH = os.path.join(SRC_DIR, 'config', 'schema_info.json')
-
-# Module-level caches
-_SCHEMA_CACHE: Optional[str] = None
-_DB_ENGINE: Optional[Engine] = None
-
-# Configuration constants
-MAX_RETRY_COUNT = 3
-VALID_CHART_TYPES = {'bar', 'line', 'pie'}
-
-
-def get_cached_engine() -> Engine:
-    """
-    Get or create cached database engine.
-    
-    Uses a module-level global variable `_DB_ENGINE` to store the connection pool,
-    preventing overhead from recreating engines on every request.
-    
-    Returns:
-        sqlalchemy.Engine: Active database engine instance
-    """
-    global _DB_ENGINE
-    if _DB_ENGINE is None:
-        _DB_ENGINE = get_db_engine()
-    return _DB_ENGINE
-
-
-def load_schema_info() -> str:
-    """
-    Load pre-generated schema info from schema_info.json with caching.
-    
-    The schema information is critical for the LLM to generate valid SQL.
-    It includes table names, column names, types, and foreign key relationships.
-    
-    Returns:
-        str: LLM-ready schema description string
-    
-    Raises:
-        SchemaLoadError: If schema file not found or invalid
-    """
-    global _SCHEMA_CACHE
-
-    if _SCHEMA_CACHE is not None:
-        return _SCHEMA_CACHE
-
-    if not os.path.exists(SCHEMA_JSON_PATH):
-        raise SchemaLoadError(
-            f"{SCHEMA_JSON_PATH} not found.\n"
-            "Please run: python src/generate_schema.py"
-        )
-
-    try:
-        with open(SCHEMA_JSON_PATH, 'r', encoding='utf-8') as f:
-            schema_data = json.load(f)
-
-        _SCHEMA_CACHE = schema_data.get('llm_prompt', '')
-
-        if not _SCHEMA_CACHE:
-            raise SchemaLoadError("Empty llm_prompt in schema_info.json")
-
-        logger.info("Schema info loaded and cached")
-        return _SCHEMA_CACHE
-
-    except json.JSONDecodeError as e:
-        raise SchemaLoadError(f"Invalid JSON in schema file: {e}")
-
-
-def apply_pii_masking(rows: list[dict]) -> list[dict]:
-    """
-    Apply deterministic PII masking to SQL results (Python-only, no LLM).
-
-    Loads PII column names from schema_info.json and masks matching columns
-    with "Person #N" format. Removes duplicate name fields (e.g., firstName + lastName).
-
-    Args:
-        rows: SQL query results as list of dicts
-
-    Returns:
-        Masked rows with PII replaced
-    """
-    if not rows:
-        return rows
-
-    # Load PII columns from schema_info.json
-    try:
-        with open(SCHEMA_JSON_PATH, 'r', encoding='utf-8') as f:
-            schema_data = json.load(f)
-        pii_columns_config = schema_data.get('pii_columns', {})
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        logger.debug("No PII configuration found, skipping masking")
-        return rows
-
-    # Flatten all PII columns into a single set (table-agnostic matching)
-    pii_columns = set()
-    for table_pii in pii_columns_config.values():
-        pii_columns.update(table_pii)
-
-    if not pii_columns:
-        return rows
-
-    logger.info(f"Masking PII columns: {pii_columns}")
-
-    # Apply masking
-    masked_rows = []
-    person_counter = 1
-
-    for row in rows:
-        masked_row = {}
-        first_pii_found = False
-
-        for col_name, value in row.items():
-            if col_name in pii_columns:
-                if not first_pii_found:
-                    masked_row[col_name] = f"Person #{person_counter}"
-                    first_pii_found = True
-                # Skip other PII columns in same row (e.g., lastName after firstName)
-            else:
-                masked_row[col_name] = value
-
-        if first_pii_found:
-            person_counter += 1
-
-        masked_rows.append(masked_row)
-
-    logger.info(f"Masked {person_counter - 1} individuals")
-    return masked_rows
 
 
 def read_question(state: SQLAgentState) -> dict:

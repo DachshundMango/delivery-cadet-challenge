@@ -2,12 +2,13 @@
 
 import json
 import os
+import re
 from typing import Set
 from src.core.errors import ValidationError, SQLGenerationError
 from src.core.logger import setup_logger
 import sqlparse
-from sqlparse.sql import IdentifierList, Identifier
-from sqlparse.tokens import Keyword
+from sqlparse.sql import IdentifierList, Identifier, Function, Parenthesis
+from sqlparse.tokens import Keyword, DML
 
 logger = setup_logger('cadet.validation')
 
@@ -72,7 +73,6 @@ def _extract_cte_names(sql_query: str) -> Set[str]:
     Returns:
         Set of CTE names (lowercase)
     """
-    import re
     cte_names = set()
     
     # Remove comments to avoid false positives
@@ -109,10 +109,6 @@ def _extract_subquery_aliases(sql_query: str) -> Set[str]:
     Returns:
         Set of subquery alias names (lowercase)
     """
-    import sqlparse
-    from sqlparse.sql import Identifier, IdentifierList, Parenthesis
-    from sqlparse.tokens import Keyword, DML
-    
     aliases = set()
     
     try:
@@ -160,8 +156,6 @@ def _extract_table_names(parsed_query) -> Set[str]:
     Returns:
         Set of table names (lowercase)
     """
-    from sqlparse.sql import Function, Parenthesis
-
     tables = set()
     from_or_join_seen = False
 

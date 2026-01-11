@@ -19,6 +19,7 @@ import os
 import json
 import csv
 import io
+import re
 from typing import Optional
 from src.agent.state import SQLAgentState
 from src.agent.prompts import (
@@ -27,9 +28,11 @@ from src.agent.prompts import (
     get_sql_generation_prompt,
     get_simple_sql_for_pyodide_prompt,
     get_visualization_prompt,
+    get_chart_title_prompt,
     get_pyodide_analysis_prompt,
     get_response_generation_prompt,
 )
+from src.agent.error_feedback import get_sql_error_feedback
 from src.core.logger import setup_logger
 from src.core.validation import validate_sql_query
 from src.core.errors import (
@@ -53,10 +56,10 @@ from src.agent.config import (
     MAX_RETRY_COUNT,
     VALID_CHART_TYPES
 )
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.types import Command
-from sqlalchemy import create_engine, text, Engine
+from sqlalchemy import text, Engine
 from sqlalchemy.exc import SQLAlchemyError
 import plotly.express as px
 
@@ -254,7 +257,6 @@ def generate_SQL(state: SQLAgentState) -> dict:
             previous_error = state.get('query_result', '')
 
             # Use error feedback router to get targeted guidance
-            from src.agent.error_feedback import get_sql_error_feedback
             sql_prompt += get_sql_error_feedback(previous_error, allowed_tables)
 
             logger.info(f"Retry {retry_count}: Added specific feedback for error type")
@@ -263,7 +265,6 @@ def generate_SQL(state: SQLAgentState) -> dict:
         raw_content = response.content.strip()
 
         # Try XML parsing first (new structured format)
-        import re
         sql_match = re.search(r'<sql>(.*?)</sql>', raw_content, re.DOTALL | re.IGNORECASE)
 
         if sql_match:
@@ -425,8 +426,6 @@ def visualisation_request_classification(state: SQLAgentState) -> dict:
         # Generate chart title using LLM (token-optimized)
         chart_title = None
         try:
-            from src.agent.prompts import get_chart_title_prompt
-            
             title_prompt = get_chart_title_prompt(user_question, chart_type)
             title_response = llm_vis.invoke(title_prompt)
             chart_title = title_response.content.strip()
@@ -768,7 +767,6 @@ def generate_response(state: SQLAgentState) -> dict:
     raw_content = response.content.strip()
 
     # Try XML parsing first (new structured format)
-    import re
     answer_match = re.search(r'<answer>(.*?)</answer>', raw_content, re.DOTALL | re.IGNORECASE)
     insight_match = re.search(r'<insight>(.*?)</insight>', raw_content, re.DOTALL | re.IGNORECASE)
 
@@ -785,7 +783,6 @@ def generate_response(state: SQLAgentState) -> dict:
 
         logger.info("Response generated successfully (XML format)")
         # Create new message with parsed content
-        from langchain_core.messages import AIMessage
         return {"messages": [AIMessage(content=final_response)]}
     else:
         # Fallback to legacy format (use response as-is)

@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+import json
 
 # Add project root to path for consistent imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -40,7 +41,6 @@ while True:
                 if result and not result.startswith("Error:"):
                     # Count rows if result is a list
                     try:
-                        import json
                         data = json.loads(result) if isinstance(result, str) else result
                         if isinstance(data, list):
                             print(f"Query executed: {len(data)} rows returned\n")

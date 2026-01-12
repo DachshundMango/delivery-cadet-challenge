@@ -627,4 +627,83 @@ langgraph dev
 
 ---
 
+## Limitations & Roadmap
+
+### Current Limitations
+
+1. **Limited Chart Types**: Currently supports bar, line, pie, scatter, and area charts
+   - Heatmaps, box plots, histograms, and other advanced visualisations not yet implemented
+   - Workaround: Use Pyodide mode for custom visualizations with matplotlib (when implemented)
+
+2. **Pyodide Performance**: Python execution triggered by keyword matching
+   - Simple keyword-based classification may miss nuanced analysis requests
+   - Pandas loading time (~2-3 seconds) on first use
+   - Increased browser memory consumption
+   - Workaround: Explicitly use keywords like "correlation" or "regression" to trigger Pyodide
+
+3. **LLM-Based PII Detection**: Uses LLM to identify personal information columns
+   - Accuracy depends on sample data quality and LLM reasoning
+   - May miss PII columns with ambiguous names or unclear data patterns
+   - Requires manual verification via color-coded report
+   - Can be manually adjusted by editing `schema_info.json`
+   - Workaround: Review the PII detection report carefully and manually edit if needed
+
+4. **Single LLM Dependency**: If Cerebras API is down, entire system fails
+   - No fallback mechanism
+   - Workaround: Keep a backup API key or wait for service restoration
+
+5. **No Query Caching**: Identical queries are re-executed each time
+   - Slower for repeated questions
+   - Increased API costs
+   - Workaround: Manually save important results
+
+### Planned Improvements
+
+#### Short-term (Next Release)
+
+1. **Advanced Visualisations**: Expand chart types beyond current set
+   - Heatmaps, box plots, histograms
+   - Multi-axis and combination charts
+   - Customisable chart styling and themes
+
+2. **Smart Pyodide Triggering**: Enhance Python execution classification
+   - Use LLM-based classification instead of keyword matching for better accuracy
+   - Add support for Korean and other language keywords
+   - Fine-tune trigger conditions to reduce false positives
+
+#### Medium-term (Future Releases)
+
+3. **Extended Python Capabilities**: Add numpy, scipy, matplotlib support
+   - Statistical hypothesis testing
+   - Advanced mathematical operations
+   - Chart generation from Python code
+
+4. **Enhanced PII Detection**: Improve LLM-based detection accuracy
+   - Fine-tune prompts for better edge case handling
+   - Add support for additional PII types (emails, phone numbers, addresses)
+   - Implement confidence scores for detection results
+
+5. **LLM Fallback Chain**: Add OpenAI or Anthropic as backup
+   - Graceful degradation if primary LLM fails
+   - Automatic failover mechanism
+
+6. **Redis Caching Layer**: Cache SQL results and LLM responses
+   - Faster responses for common questions
+   - Reduced API costs
+   - TTL-based cache invalidation
+
+#### Long-term Vision
+
+7. **Proactive Insights**: Agent automatically discovers interesting patterns
+   - Periodic analysis of data
+   - Suggested questions to users
+   - Anomaly detection and alerts
+
+8. **Multi-Database Support**: Extend beyond PostgreSQL
+   - MySQL, SQLite, Snowflake adapters
+   - Dialect-aware SQL generation
+   - Cross-database queries
+
+---
+
 **Last Updated:** 2026-01-11

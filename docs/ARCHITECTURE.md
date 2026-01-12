@@ -4,6 +4,8 @@ This document provides a comprehensive overview of Delivery Cadet's system desig
 
 ## Table of Contents
 
+- [Features](#features)
+- [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [High-Level Architecture](#high-level-architecture)
 - [LangGraph Workflow](#langgraph-workflow)
@@ -11,6 +13,65 @@ This document provides a comprehensive overview of Delivery Cadet's system desig
 - [Data Flow](#data-flow)
 - [Dataset-Agnostic Design](#dataset-agnostic-design)
 - [Module Responsibilities](#module-responsibilities)
+
+---
+
+## Features
+
+### Core Capabilities
+
+- **Natural Language to SQL**: Converts user questions into valid PostgreSQL queries
+- **Intent Classification**: Intelligently routes between SQL-based queries and general conversation
+- **Automatic Query Retry**: Self-correcting mechanism for failed queries with LLM-powered error feedback
+- **Data Visualisation**: Automatic chart generation (bar, line, pie, scatter, area) using Plotly for visual data insights
+- **In-Browser Python Execution**: Pyodide-powered pandas analysis running directly in the browser for advanced statistical operations
+- **Conversational Interface**: ChatGPT-style UI for seamless user interaction with streaming responses
+- **Real-time Streaming**: Live response streaming through the web interface via LangGraph Server
+- **Dataset-Agnostic Design**: Easily adaptable to new datasets via metadata configuration without code changes
+
+### Data Pipeline
+
+- **Automated ETL**: Robust CSV-to-database loading with automatic schema generation
+- **Primary/Foreign Key Management**: Automatic key detection and relationship mapping with interactive configuration
+- **Data Integrity Validation**: Built-in checks for referential integrity and constraint violations
+- **Schema Profiling**: Automatic column analysis and statistics generation for optimal query planning
+- **Relationship Discovery**: Intelligent FK relationship suggestions based on naming patterns and data analysis
+- **Interactive Data Transformation**: SQL console for fixing data issues before loading
+
+### Privacy & Security
+
+- **LLM-Powered PII Detection**: Automatic identification of personal information columns during schema generation
+- **Runtime PII Masking**: Personal names automatically replaced with `Person #1`, `Person #2`, etc. in query results
+- **Human-in-the-Loop Verification**: Color-coded PII report for user review before masking activation
+- **Manual Override**: Edit `schema_info.json` to add/remove PII columns as needed
+- **SQL Injection Prevention**: Query validation blocks dangerous keywords (DROP, DELETE, UPDATE, etc.)
+- **Read-Only Access**: Only SELECT queries allowed, no write operations
+- **Execution Tracing**: LangSmith integration for debugging and monitoring
+
+---
+
+## Tech Stack
+
+### Backend
+- **Python 3.12**: Core application language
+- **LangGraph**: State machine framework for agent workflow orchestration
+- **Cerebras (llama-3.3-70b)**: Fast LLM inference for all AI tasks
+- **PostgreSQL 15**: Relational database with JSON support
+- **SQLAlchemy**: ORM and connection pooling
+- **Plotly**: Interactive chart generation
+
+### Frontend
+- **Next.js 15**: React framework with App Router
+- **React 19**: UI framework with concurrent rendering
+- **TypeScript**: Type-safe JavaScript
+- **Tailwind CSS**: Utility-first styling
+- **Pyodide**: In-browser Python runtime for pandas analysis
+- **react-plotly.js**: Plotly charts in React
+
+### Infrastructure
+- **Docker Compose**: PostgreSQL and PgAdmin containerization
+- **LangGraph Server**: Agent runtime with streaming support
+- **LangSmith**: Execution tracing and debugging
 
 ---
 

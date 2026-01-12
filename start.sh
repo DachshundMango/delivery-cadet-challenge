@@ -6,11 +6,13 @@ if [ "$1" == "--reset" ]; then
     RESET_FLAG=true
 fi
 
-# Check if conda environment 'cadet' is activated
-if [ "$CONDA_DEFAULT_ENV" != "cadet" ]; then
-    echo "Error: conda environment 'cadet' is not activated."
-    echo "Please run: conda activate cadet"
-    exit 1
+# Recommend using virtual environment
+if [ -z "$CONDA_DEFAULT_ENV" ] && [ -z "$VIRTUAL_ENV" ]; then
+    echo "⚠️  Warning: No virtual environment detected."
+    echo "It's recommended to activate a virtual environment first:"
+    echo "  • For venv: source venv/bin/activate"
+    echo "  • For conda: conda activate cadet"
+    echo ""
 fi
 
 # Check if data pipeline setup is needed

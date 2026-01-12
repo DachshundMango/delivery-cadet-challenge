@@ -225,6 +225,260 @@ cadet/
 
 ## LangGraph Workflow
 
+### 🎯 Quick Summary
+
+**How Delivery Cadet answers your questions:**
+
+1. **Question received** → LLM generates SQL → PostgreSQL executes → Results returned
+2. **SQL fails?** → Error analysed, automatically retries up to 3 times (LLM receives feedback and fixes it)
+3. **All 3 attempts fail?** → Switches to simple SQL to fetch raw data → Python (pandas) processes it in browser
+
+> 💡 **Core idea:** If complex SQL doesn't work → Just fetch the data → Let Python handle it in the user's browser
+
+---
+
+### 📖 Real-World Examples
+
+#### Scenario A: Success on First Try ✅
+
+```
+User: "What were last month's sales?"
+   ↓
+LLM: SELECT SUM(amount) FROM orders WHERE created_at >= '2024-12-01'
+   ↓
+PostgreSQL executes → Success!
+   ↓
+Result: "Last month's sales were $125,450."
+```
+
+#### Scenario B: Success After Retry 🔄
+
+```
+User: "Show purchase count by customer"
+   ↓
+[Attempt 1] LLM: SELECT customer, COUNT(*) FROM it GROUP BY 1  ❌
+Error: "Unknown tables: {'it'}"
+   ↓
+Feedback: "Table name error. Available: customers, orders. No abbreviations."
+   ↓
+[Attempt 2] LLM: SELECT customer_name, COUNT(*) FROM orders GROUP BY 1  ✅
+PostgreSQL executes → Success!
+   ↓
+Result: Bar chart showing purchases by customer
+```
+
+#### Scenario C: Pyodide Fallback 🐍
+
+```
+User: "Analyse sales trends and correlations by date"
+   ↓
+[Attempts 1-3] Complex SQL with date functions fails 3 times ❌
+   ↓
+System: "SQL's not cutting it... switching strategy!"
+   ↓
+[Attempt 4] Simple SQL: SELECT date, amount FROM orders  ✅
+   ↓
+Python executes in browser:
+  df = pandas.DataFrame(data)
+  df['date'] = pandas.to_datetime(df['date'])
+  correlation = df['amount'].corr(df['date'])
+   ↓
+Result: "The correlation coefficient between sales and date is 0.73."
+```
+
+---
+
+### 🎬 Step-by-Step Guide
+
+#### Step 1: Receive Question 📝
+```
+[read_question]
+Extract question from user message
+   ↓
+state.user_question = "What were last month's sales?"
+```
+
+#### Step 2: Classify Intent 🤔
+```
+[intent_classification]
+LLM analyses question (temperature: 0.0 = consistent)
+   ↓
+Decision: "sales" = data query required
+   ↓
+state.intent = "sql"  (or "general")
+```
+- **"sql"** → Database query needed
+- **"general"** → Casual chat (e.g., "hello", "thanks")
+
+#### Step 3: Decide Analysis Method 🔍
+```
+[pyodide_request_classification]
+Check for advanced analysis keywords:
+  - "correlation", "regression", "standard deviation"
+  - "statistics", "distribution", "outliers"
+   ↓
+None found → SQL alone is sufficient
+Found → Python needed (simple SQL + Pandas)
+   ↓
+state.needs_pyodide = True/False
+```
+
+#### Step 4: Generate & Execute SQL 💻
+```
+[generate_SQL]
+1. Load schema: schema_info.json (cached)
+2. Check needs_pyodide flag:
+   - False → Complex SQL (JOIN, GROUP BY, aggregations)
+   - True → Simple SQL (SELECT columns only)
+3. Ask LLM to generate SQL (temperature: 0.1 = accuracy)
+4. Security validation: Check for DROP/DELETE/--
+   ↓
+state.sql_query = "SELECT ..."
+   ↓
+[execute_SQL]
+PostgreSQL executes
+   ↓
+state.query_result = '[{"col": "val"}]'  (or "Error: ...")
+```
+
+**🔄 If it fails?**  
+→ See [Retry Mechanism](#retry-mechanism-automatic-recovery)
+
+#### Step 5: Determine if Visualisation Needed 📊
+```
+[visualisation_request_classification]
+Analyse question:
+  - Contains "chart", "graph", "visualise" keywords?
+  - Is data suitable for visualisation?
+   ↓
+Yes → LLM generates chart title + creates Plotly chart
+No → Text response only
+   ↓
+state.plotly_data = '{"type": "bar", ...}'  (or None)
+```
+
+#### Step 6: Python Analysis (If Needed) 🐍
+```
+[generate_pyodide_analysis]  (only when needs_pyodide=True)
+LLM generates pandas code:
+  import pandas as pd
+  df = pd.DataFrame(data)
+  result = df.groupby('category')['amount'].mean()
+   ↓
+Pyodide executes in browser
+   ↓
+Result stored as ToolMessage
+```
+
+#### Step 7: Generate Final Response ✍️
+```
+[generate_response]
+LLM synthesises (temperature: 0.7 = natural):
+  - SQL results
+  - Chart (if present)
+  - Python analysis (if present)
+   ↓
+Converts to natural language
+   ↓
+Streams to user
+```
+
+---
+
+### 🔄 Retry Mechanism (Automatic Recovery)
+
+#### 🎯 Core Rules
+
+| Situation | Action | Counter | Next Step |
+|-----------|--------|---------|-----------|
+| SQL succeeds ✅ | Proceed | - | Visualisation check |
+| SQL fails (1-2 times) ❌ | Analyse error → Retry | +1 | Regenerate SQL |
+| SQL fails (3 times) 💥 | Enable Pyodide fallback | Reset → 0 | Simple SQL |
+| Pyodide also fails 🚫 | Give up | - | Error message |
+
+#### 📖 Detailed Flow
+
+```
+execute_SQL
+   ↓
+Check result (routing.py: decide_sql_retry_route)
+   ↓
+┌─────────────┬─────────────┬─────────────┐
+│  Success ✅ │  Failed ❌   │  None ⚠️    │
+└──────┬──────┴──────┬──────┴──────┬──────┘
+       │             │             │
+       ▼             ▼             ▼
+return "success"  is_error_result?  return "retry"
+       │             │
+       │        ┌────┴────┐
+       │        │  True   │
+       │        └────┬────┘
+       │             │
+       │        retry_count < 3?
+       │             │
+       │        ┌────┴────┐
+       │    Yes │     No  │
+       │        ▼         ▼
+       │    "retry"   fallback_attempted?
+       │        │         │
+       │        │    ┌────┴────┐
+       │        │  No │    Yes  │
+       │        │    ▼         ▼
+       │        │"fallback" "success"
+       │        │    │      (give up)
+       └────────┴────┴───────┘
+                │
+                ▼
+        Route to next node
+```
+
+#### 💡 Actual Code Implementation
+
+**State Variables (state.py):**
+- `sql_retry_count`: Number of SQL failures (0-3)
+- `pyodide_fallback_attempted`: Whether fallback has been tried (True/False)
+- `query_result`: Execution result or "Error: ..." string
+
+**Routing Logic (routing.py: decide_sql_retry_route):**
+```python
+# 1. Result is None → retry
+if result is None:
+    return "retry"
+
+# 2. Check for errors
+if is_error_result(result):  # Checks if starts with "Error:"
+    retry_count = state.get('sql_retry_count', 0) or 0
+    
+    # Less than 3 attempts → retry
+    if retry_count < max_retries:
+        return "retry"  # sql_retry_count++ handled in execute_SQL
+    
+    # 3 or more attempts → check fallback status
+    fallback_attempted = state.get('pyodide_fallback_attempted', False)
+    if not fallback_attempted:
+        return "fallback"  # Switch to Pyodide mode
+    else:
+        return "success"  # Give up, pass error message
+
+# 3. Success
+return "success"
+```
+
+**Enable Fallback (nodes.py: enable_pyodide_fallback):**
+```python
+state['needs_pyodide'] = True  # Simple SQL mode
+state['sql_retry_count'] = 0   # Reset counter
+state['query_result'] = None   # Clear error
+state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
+```
+
+---
+
+### 🔧 Technical Details
+
+<details>
+<summary>📐 Complete State Machine Diagram (Click to expand)</summary>
+
 ### State Machine Diagram
 
 ```
@@ -320,56 +574,7 @@ cadet/
                  └─────┘
 ```
 
-### Retry Mechanism
-
-**Current Flow:**
-
-```
-generate_SQL
-    ↓
-    LLM generates SQL (simple if needs_pyodide=True, complex otherwise)
-    ↓
-validate_sql_query() (validation.py)
-    ↓
-┌─ PASS → execute_SQL → PostgreSQL execution
-│           ↓
-│       ┌─ Success → check_query_validation → "success" → visualisation
-│       │
-│       └─ SQL Error → query_result="Error: ..."
-│                      sql_retry_count++
-│                      ↓
-│                  check_query_validation
-│                      ↓
-│                  ┌─ sql_retry_count < 3 → "retry" → generate_SQL (with feedback)
-│                  │
-│                  └─ sql_retry_count >= 3 (AND !pyodide_fallback_attempted)
-│                                          → "fallback" → enable_pyodide_fallback
-│                                                         ↓
-│                                                     Set needs_pyodide=True
-│                                                     Reset sql_retry_count=0
-│                                                     Clear query_result
-│                                                         ↓
-│                                                     generate_SQL (simple SQL mode)
-│
-└─ FAIL → Error stored in query_result
-          sql_retry_count++
-          ↓
-      execute_SQL (skips execution if error present)
-          ↓
-      check_query_validation (detects error in query_result)
-          ↓
-      ┌─ sql_retry_count < 3 → "retry" → generate_SQL (with error feedback)
-      │
-      └─ sql_retry_count >= 3 (AND !pyodide_fallback_attempted)
-                              → "fallback" → enable_pyodide_fallback
-```
-
-**Key Features:**
-
-1. **Dedicated Counter:** Uses `sql_retry_count` state variable to prevent token overflow
-2. **Pyodide Fallback:** After 3 SQL failures, switches to simple SQL + Python analysis mode
-3. **Fallback Guard:** `pyodide_fallback_attempted` flag prevents infinite fallback loops
-4. **Targeted Feedback:** `error_feedback.py` provides specific hints based on error type
+</details>
 
 ---
 
@@ -573,73 +778,6 @@ validate_sql_query() (validation.py)
 
 9. Frontend Display
    → Streaming text response to user
-```
-
-### Error Retry Flow
-
-```
-1. SQL Generation Attempt #1
-   → SQL: SELECT * FROM it WHERE ...
-
-2. Validation Failed
-   → Error: "Unknown tables in query: {'it'}"
-   → Stored in query_result
-   → sql_retry_count = 1
-
-3. execute_SQL (Skip)
-   → Detects error in query_result → return {} (pass through)
-
-4. check_query_validation
-   → is_error_result(query_result) → True
-   → sql_retry_count = 1 < 3
-   → return "retry"
-
-5. SQL Generation Attempt #2 (with feedback)
-   → Previous error: "Unknown tables: {'it'}"
-   → Feedback: "Use ONLY: customers, orders, products. Do NOT abbreviate."
-   → SQL: SELECT * FROM customers WHERE ...
-
-6. Validation Passed
-   → execute_SQL → Success
-```
-
-### Pyodide Fallback Flow
-
-```
-1. SQL Generation Attempts #1, #2, #3
-   → All failed with complex SQL errors (e.g., date function issues)
-   → sql_retry_count = 3
-
-2. check_query_validation
-   → sql_retry_count >= 3
-   → pyodide_fallback_attempted = False
-   → return "fallback"
-
-3. enable_pyodide_fallback
-   → Set needs_pyodide = True
-   → Reset sql_retry_count = 0
-   → Clear query_result = None
-   → Set pyodide_fallback_attempted = True
-
-4. SQL Generation Attempt #4 (Simple SQL Mode)
-   → Uses get_simple_sql_for_pyodide_prompt()
-   → SQL: SELECT "column1", "column2", "dateTime" FROM table
-   → No aggregations, no window functions, no date operations
-
-5. execute_SQL → Success
-   → Raw data fetched: [{"column1": "value", "dateTime": "2024-01-01"}, ...]
-
-6. visualisation_request_classification
-   → check_pyodide_classification
-   → needs_pyodide = True → route to generate_pyodide_analysis
-
-7. generate_pyodide_analysis
-   → Generates pandas code for statistical analysis
-   → Injects CSV data directly into code
-   → Returns ToolMessage with Python code
-
-8. generate_response
-   → Formats final answer with analysis results
 ```
 
 ---

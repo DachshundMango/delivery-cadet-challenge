@@ -12,7 +12,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Natural Language to SQL**: Converts user questions into valid PostgreSQL queries
 - **Intent Classification**: Intelligently routes between SQL-based queries and general conversation
 - **Automatic Query Retry**: Self-correcting mechanism for failed queries
-- **Data Visualisation**: Automatic chart generation (bar, line, pie) using Plotly for visual data insights
+- **Data Visualisation**: Automatic chart generation (bar, line, pie, scatter, area) using Plotly for visual data insights
 - **In-Browser Python Execution**: Pyodide-powered pandas analysis running directly in the browser
 - **Conversational Interface**: ChatGPT-style UI for seamless user interaction
 - **Real-time Streaming**: Live response streaming through the web interface
@@ -257,8 +257,8 @@ Interactive command-line interface for testing the agent directly.
 
 ### Current Limitations
 
-1. **Limited Chart Types**: Currently supports only bar, line, and pie charts
-   - Scatter plots, heatmaps, and other advanced visualisations not yet implemented
+1. **Limited Chart Types**: Currently supports bar, line, pie, scatter, and area charts
+   - Heatmaps, box plots, histograms, and other advanced visualisations not yet implemented
 
 2. **Pyodide Performance**: Python execution triggered by keyword matching
    - Simple keyword-based classification may miss nuanced analysis requests
@@ -279,8 +279,8 @@ Interactive command-line interface for testing the agent directly.
 
 ### Planned Improvements
 
-1. **Advanced Visualisations**: Expand chart types beyond bar, line, and pie
-   - Scatter plots, heatmaps, box plots, histograms
+1. **Advanced Visualisations**: Expand chart types beyond current set
+   - Heatmaps, box plots, histograms (scatter and area charts implemented)
    - Multi-axis and combination charts
    - Customisable chart styling and themes
 

@@ -11,14 +11,14 @@ This module contains prompts for:
 def get_chart_title_prompt(user_question: str, chart_type: str) -> str:
     """
     Generate minimal prompt for chart title generation (token-optimized).
-    
+
     Uses minimal tokens (~30-60) while maintaining quality with Temperature 0.0.
     The llama-3.3-70b model is capable enough to understand brief instructions.
-    
+
     Args:
         user_question: User's original question
-        chart_type: Type of chart (bar, line, pie)
-    
+        chart_type: Type of chart (bar, line, pie, scatter, area)
+
     Returns:
         Minimal prompt string optimised for token efficiency
     """
@@ -78,7 +78,9 @@ Only return "yes" if the user EXPLICITLY requests a visualization using specific
 **Chart Type Selection (only if visualise="yes"):**
 - Comparison/ranking → "bar"
 - Time series/trends → "line"
+- Time series with cumulative/fill → "area"
 - Proportions/breakdown → "pie"
+- Correlation/relationship between two numeric variables → "scatter"
 
 **OUTPUT FORMAT:**
 Return ONLY valid JSON. NO explanations, NO text before/after:

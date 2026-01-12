@@ -381,9 +381,9 @@ OPENAI_API_KEY=your_key_here
 
 ### Adding New Chart Type
 
-1. **Update validation** in `nodes.py`:
+1. **Update validation** in `config.py`:
 ```python
-VALID_CHART_TYPES = {'bar', 'line', 'pie', 'scatter'}  # Add scatter
+VALID_CHART_TYPES = {'bar', 'line', 'pie', 'scatter', 'area'}  # scatter and area added
 ```
 
 2. **Add chart generation logic**:

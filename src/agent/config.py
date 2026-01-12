@@ -60,4 +60,4 @@ llm = llm_sql
 
 # Workflow configuration constants
 MAX_SQL_RETRIES = 3  # Maximum SQL generation/execution retry attempts
-VALID_CHART_TYPES = {'bar', 'line', 'pie'}
+VALID_CHART_TYPES = {'bar', 'line', 'pie', 'scatter', 'area'}

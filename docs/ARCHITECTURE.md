@@ -377,7 +377,12 @@ validate_sql_query() (validation.py)
 - **LLM Temperature:** 0.0 (strict keyword detection)
 - **Keywords:** "chart", "graph", "plot", "visualize", "visualization", "draw"
 - **Default:** `"no"` (prevents over-generation)
-- **Chart Types:** bar (comparison), line (time series), pie (proportions)
+- **Chart Types:**
+  - bar (comparison/ranking)
+  - line (time series trends)
+  - pie (proportions/breakdown)
+  - scatter (correlation between two numeric variables)
+  - area (time series with cumulative/fill emphasis)
 
 ### 6. Pyodide Request Classification
 

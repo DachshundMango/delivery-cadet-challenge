@@ -464,7 +464,7 @@ def create_plotly_chart(sql_result, chart_type, title=None, user_question=""):
     
     Args:
         sql_result: JSON string of SQL query results
-        chart_type: Type of chart ('bar', 'line', 'pie')
+        chart_type: Type of chart ('bar', 'line', 'pie', 'scatter', 'area')
         title: Pre-generated chart title (from LLM). If None, generates from user_question
         user_question: User's original question (fallback for title generation)
         
@@ -584,6 +584,22 @@ def create_plotly_chart(sql_result, chart_type, title=None, user_question=""):
     elif chart_type == "pie":
         fig = px.pie(names=x_data, values=y_data, hole=0.3)
         fig.update_traces(textposition='inside', textinfo='percent+label')
+    elif chart_type == "scatter":
+        fig = px.scatter(x=x_data, y=y_data)
+        fig.update_layout(
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            showlegend=False
+        )
+        fig.update_traces(marker=dict(size=8, opacity=0.7))
+    elif chart_type == "area":
+        fig = px.area(x=x_data, y=y_data)
+        fig.update_layout(
+            xaxis_title=x_label,
+            yaxis_title=y_label,
+            showlegend=False
+        )
+        fig.update_traces(line=dict(width=2))
     else:
         # Fallback to bar chart for unknown types
         fig = px.bar(x=x_data, y=y_data)

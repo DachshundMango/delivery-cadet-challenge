@@ -53,6 +53,7 @@ This document provides a comprehensive overview of Delivery Cadet's system desig
 ## Tech Stack
 
 ### Backend
+
 - **Python 3.12**: Core application language
 - **LangGraph**: State machine framework for agent workflow orchestration
 - **Cerebras (llama-3.3-70b)**: Fast LLM inference for all AI tasks
@@ -61,6 +62,7 @@ This document provides a comprehensive overview of Delivery Cadet's system desig
 - **Plotly**: Interactive chart generation
 
 ### Frontend
+
 - **Next.js 15**: React framework with App Router
 - **React 19**: UI framework with concurrent rendering
 - **TypeScript**: Type-safe JavaScript
@@ -69,6 +71,7 @@ This document provides a comprehensive overview of Delivery Cadet's system desig
 - **react-plotly.js**: Plotly charts in React
 
 ### Infrastructure
+
 - **Docker Compose**: PostgreSQL and PgAdmin containerization
 - **LangGraph Server**: Agent runtime with streaming support
 - **LangSmith**: Execution tracing and debugging
@@ -291,6 +294,7 @@ Result: "The correlation coefficient between sales and date is 0.73."
 ### 🎬 Step-by-Step Guide
 
 #### Step 1: Receive Question 📝
+
 ```
 [read_question]
 Extract question from user message
@@ -299,6 +303,7 @@ state.user_question = "What were last month's sales?"
 ```
 
 #### Step 2: Classify Intent 🤔
+
 ```
 [intent_classification]
 LLM analyses question (temperature: 0.0 = consistent)
@@ -307,10 +312,12 @@ Decision: "sales" = data query required
    ↓
 state.intent = "sql"  (or "general")
 ```
+
 - **"sql"** → Database query needed
 - **"general"** → Casual chat (e.g., "hello", "thanks")
 
 #### Step 3: Decide Analysis Method 🔍
+
 ```
 [pyodide_request_classification]
 Check for advanced analysis keywords:
@@ -324,6 +331,7 @@ state.needs_pyodide = True/False
 ```
 
 #### Step 4: Generate & Execute SQL 💻
+
 ```
 [generate_SQL]
 1. Load schema: schema_info.json (cached)
@@ -345,6 +353,7 @@ state.query_result = '[{"col": "val"}]'  (or "Error: ...")
 → See [Retry Mechanism](#retry-mechanism-automatic-recovery)
 
 #### Step 5: Determine if Visualisation Needed 📊
+
 ```
 [visualisation_request_classification]
 Analyse question:
@@ -358,6 +367,7 @@ state.plotly_data = '{"type": "bar", ...}'  (or None)
 ```
 
 #### Step 6: Python Analysis (If Needed) 🐍
+
 ```
 [generate_pyodide_analysis]  (only when needs_pyodide=True)
 LLM generates pandas code:
@@ -371,6 +381,7 @@ Result stored as ToolMessage
 ```
 
 #### Step 7: Generate Final Response ✍️
+
 ```
 [generate_response]
 LLM synthesises (temperature: 0.7 = natural):
@@ -389,12 +400,12 @@ Streams to user
 
 #### 🎯 Core Rules
 
-| Situation | Action | Counter | Next Step |
-|-----------|--------|---------|-----------|
-| SQL succeeds ✅ | Proceed | - | Visualisation check |
-| SQL fails (1-2 times) ❌ | Analyse error → Retry | +1 | Regenerate SQL |
-| SQL fails (3 times) 💥 | Enable Pyodide fallback | Reset → 0 | Simple SQL |
-| Pyodide also fails 🚫 | Give up | - | Error message |
+| Situation                | Action                  | Counter   | Next Step           |
+| ------------------------ | ----------------------- | --------- | ------------------- |
+| SQL succeeds ✅          | Proceed                 | -         | Visualisation check |
+| SQL fails (1-2 times) ❌ | Analyse error → Retry   | +1        | Regenerate SQL      |
+| SQL fails (3 times) 💥   | Enable Pyodide fallback | Reset → 0 | Simple SQL          |
+| Pyodide also fails 🚫    | Give up                 | -         | Error message       |
 
 #### 📖 Detailed Flow
 
@@ -432,14 +443,17 @@ return "success"  is_error_result?  return "retry"
         Route to next node
 ```
 
-#### 💡 Actual Code Implementation
+<details>
+<summary>💡 Code Implementation Details (Click to expand)</summary>
 
 **State Variables (state.py):**
+
 - `sql_retry_count`: Number of SQL failures (0-3)
 - `pyodide_fallback_attempted`: Whether fallback has been tried (True/False)
 - `query_result`: Execution result or "Error: ..." string
 
 **Routing Logic (routing.py: decide_sql_retry_route):**
+
 ```python
 # 1. Result is None → retry
 if result is None:
@@ -448,11 +462,11 @@ if result is None:
 # 2. Check for errors
 if is_error_result(result):  # Checks if starts with "Error:"
     retry_count = state.get('sql_retry_count', 0) or 0
-    
+
     # Less than 3 attempts → retry
     if retry_count < max_retries:
         return "retry"  # sql_retry_count++ handled in execute_SQL
-    
+
     # 3 or more attempts → check fallback status
     fallback_attempted = state.get('pyodide_fallback_attempted', False)
     if not fallback_attempted:
@@ -465,12 +479,15 @@ return "success"
 ```
 
 **Enable Fallback (nodes.py: enable_pyodide_fallback):**
+
 ```python
 state['needs_pyodide'] = True  # Simple SQL mode
 state['sql_retry_count'] = 0   # Reset counter
 state['query_result'] = None   # Clear error
 state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
 ```
+
+</details>
 
 ---
 
@@ -583,161 +600,74 @@ state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
 ### 1. Intent Classification
 
 - **Node:** `intent_classification`
-- **LLM Temperature:** 0.0 (deterministic)
-- **Purpose:** Routes between SQL generation and general conversation
-- **Output:** `"sql"` or `"general"`
+- **Purpose:** Routes between SQL generation (`"sql"`) and general conversation (`"general"`) using deterministic classification
 
 ### 2. SQL Generation
 
 - **Node:** `generate_SQL`
-- **LLM Temperature:** 0.1 (accurate, low variance)
 - **Prompt Selection:** Conditional based on `needs_pyodide` flag
-  - **Simple SQL Prompt** (pyodide=True): Fetches raw data for Python analysis
-    - No aggregations (AVG, SUM, COUNT)
-    - No window functions (PARTITION BY, RANK)
-    - No date functions (EXTRACT, TO_DATE, DATE_TRUNC)
-    - Just SELECT columns AS-IS for Pandas processing
-  - **Complex SQL Prompt** (pyodide=False): Full analytical queries
-    - Aggregations, joins, subqueries allowed
-    - Database performs all computation
-- **Process:**
-  1. Load schema from `schema_info.json` (cached)
-  2. Check `needs_pyodide` flag from earlier classification
-  3. Select appropriate prompt (simple vs complex)
-  4. If retry: Add error-specific feedback from `feedbacks.py`
-  5. Call LLM to generate SQL
-  6. Parse XML response: `<reasoning>` + `<sql>`
-  7. Validate SQL for security and correctness
+  - **Simple SQL** (pyodide=True): Raw data fetch only (no aggregations/functions) for Pandas processing
+  - **Complex SQL** (pyodide=False): Full analytical queries with joins, aggregations, window functions
+- **Process:** Load cached schema → Select prompt → Add retry feedback if needed → Generate SQL → Validate for security
 
-### 3. SQL Validation (validation.py)
+### 3. SQL Validation
 
-- **Purpose:** Prevent SQL injection and ensure query correctness
-- **Checks:**
-  1. Forbidden keywords (DROP, DELETE, UPDATE, etc.)
-  2. Multiple statements (semicolon check)
-  3. Comments (-- or /\* \*/)
-  4. Unknown table names (with CTE/alias filtering)
-- **Table Extraction Logic:**
-  - Uses `sqlparse` to parse SQL into tokens
-  - Skips `Function` and `Parenthesis` tokens to avoid false positives
-  - **Implementation:** Function/Parenthesis tokens are skipped entirely without recursion to avoid extracting function arguments as table names
-  - Only statement-level FROM/JOIN clauses are processed for table extraction
-- **On Error:** Raises `SQLGenerationError` with detailed debug logs
+- **Module:** `validation.py`
+- **Checks:** Forbidden keywords (DROP/DELETE), multiple statements, comments, unknown table names
+- **Security:** Uses `sqlparse` to extract table names while skipping function arguments to prevent false positives
 
 ### 4. Query Execution
 
 - **Node:** `execute_SQL`
-- **Process:**
-  1. Skip execution if validation error already in `query_result`
-  2. Execute SQL via SQLAlchemy
-  3. Apply PII masking (deterministic, Python-based)
-  4. Return JSON result or error message
-- **Retry Limit:** 3 attempts (tracked via `sql_retry_count` in state)
-- **Error Handling:**
-  - Validation errors: Skips execution, passes error through
-  - Database errors: Increments `sql_retry_count`, stores error in `query_result`
+- **Process:** Execute via SQLAlchemy → Apply deterministic PII masking → Return JSON or error
+- **Retry:** Max 3 attempts (tracked via `sql_retry_count`)
 
 ### 5. Visualization Request Classification
 
 - **Node:** `visualisation_request_classification`
-- **LLM Temperature:** 0.0 (strict keyword detection)
-- **Keywords:** "chart", "graph", "plot", "visualize", "visualization", "draw"
-- **Default:** `"no"` (prevents over-generation)
-- **Chart Types:**
-  - bar (comparison/ranking)
-  - line (time series trends)
-  - pie (proportions/breakdown)
-  - scatter (correlation between two numeric variables)
-  - area (time series with cumulative/fill emphasis)
+- **Detection:** Keyword-based (chart, graph, plot, visualize)
+- **Chart Types:** bar, line, pie, scatter, area
 
 ### 6. Pyodide Request Classification
 
 - **Node:** `pyodide_request_classification`
-- **Execution Order:** **BEFORE** SQL generation (prevents complex SQL when simple data fetch is needed)
-- **Method:** Keyword-based detection
-- **Keywords:**
-  - `correlation`, `statistical analysis`, `statistics`
-  - `standard deviation`, `variance`, `mean`
-  - `distribution`, `skewness`, `kurtosis`
-  - `outlier`, `outliers`, `percentile`, `quartile`
-  - `time series`, `trend`, `seasonality`
-  - `describe`, `summary`
-- **Output:** `needs_pyodide` boolean (stored in state for later use)
-- **Purpose:** Triggers simple SQL prompt to fetch raw data instead of performing analysis in database
-- **Future Enhancement:** LLM-based classification with multilingual support
+- **Timing:** Runs BEFORE SQL generation to prevent complex SQL when statistical analysis is needed
+- **Detection:** Keyword-based (correlation, statistics, distribution, outliers, etc.)
+- **Output:** Sets `needs_pyodide` flag to trigger simple SQL mode
 
 ### 7. Chart Generation
 
 - **Technology:** Plotly.js + react-plotly.js
-- **Process:**
-  1. Determine chart type from user question
-  2. Extract x/y axes from SQL result columns
-  3. Generate dynamic title from user question (60 char limit)
-  4. Apply PII masking to data
-  5. Return Plotly JSON spec to frontend
+- **Process:** Determine chart type → Extract axes from SQL columns → Generate dynamic title (60 char) → Return Plotly JSON spec
 
 ### 8. In-Browser Python Execution
 
-- **Technology:** Pyodide (WebAssembly Python) + react-py
-- **Libraries:** pandas (data manipulation)
-- **Process:**
-  1. LLM generates pandas analysis code
-  2. Data injected as CSV format (not JSON) for efficiency
-  3. Frontend loads Pyodide runtime
-  4. Execute code in browser sandbox
-  5. Display results in UI
+- **Technology:** Pyodide (WebAssembly) + pandas
+- **Process:** LLM generates pandas code → Data injected as CSV → Pyodide executes in browser sandbox
 - **Security:** No server-side code execution
-- **Data Format:** CSV string injected directly into Python code to prevent JSON parsing overhead
 
 ### 9. Pyodide Fallback Mechanism
 
 - **Node:** `enable_pyodide_fallback`
-- **Trigger:** After 3 consecutive SQL generation/execution failures
-- **Purpose:** Recover from complex SQL errors by simplifying the query strategy
-- **Process:**
-  1. Set `needs_pyodide=True` to enable simple SQL mode
-  2. Reset `sql_retry_count=0` for fresh retry attempts
-  3. Clear `query_result` and `sql_query` error states
-  4. Set `pyodide_fallback_attempted=True` to prevent infinite loops
-  5. Route back to `generate_SQL` with simplified prompt
-- **Fallback Strategy:**
-  - **Before fallback:** Complex SQL with aggregations, window functions, date operations
-  - **After fallback:** Simple SELECT to fetch raw data, analysis delegated to Pyodide (pandas)
-- **Guard Mechanism:** If fallback also fails after 3 attempts, routes to `generate_response` with error message
+- **Trigger:** After 3 consecutive SQL failures
+- **Strategy:** Switch from complex SQL to simple SELECT + Pandas analysis in browser
+- **Implementation:** Sets `needs_pyodide=True`, resets `sql_retry_count=0`, prevents infinite loops via `pyodide_fallback_attempted` flag
 
 ### 10. Response Generation
 
 - **Node:** `generate_response`
-- **LLM Temperature:** 0.7 (natural, varied)
-- **Output Format:** `<answer>` + `<insight>` (XML tags)
-- **PII:** Already masked in data
-- **Streaming:** Real-time response streaming to frontend
+- **Output:** Natural language synthesis of SQL results, charts, and Python analysis with real-time streaming
 
 ### 11. Error Feedback System
 
-- **Architecture:** Two-layer system for targeted error correction
-  - **feedbacks.py (306 LOC):** Message templates for each error type
-  - **error_feedback.py (114 LOC):** Router that analyzes errors and selects appropriate feedback
-- **Purpose:** Provide LLM-specific hints for error correction during retry attempts
-- **Process:**
-  1. `nodes.py` calls `get_sql_error_feedback(error_message, allowed_tables)`
-  2. `error_feedback.py` analyzes error message (regex matching)
-  3. Routes to appropriate feedback generator in `feedbacks.py`
-  4. Returns targeted hint string to append to SQL generation prompt
-- **Feedback Types (feedbacks.py):**
-  - `get_unknown_tables_feedback()` - Invalid table names (with alias detection)
-  - `get_multiple_statements_feedback()` - Semicolon usage (suggest CTE)
-  - `get_sql_comments_feedback()` - Comment removal
-  - `get_forbidden_keyword_feedback()` - Dangerous keywords (CREATE, DROP, etc.)
-  - `get_column_not_found_feedback()` - Case sensitivity and quoting rules
-  - `get_division_by_zero_feedback()` - NULLIF usage
-  - `get_datetime_format_feedback()` - Direct casting instead of TO_TIMESTAMP
-  - `get_alias_reference_feedback()` - Alias in same SELECT clause (suggest CTE)
-  - `get_parsing_error_feedback()` - Generic syntax errors (catch-all)
-- **Example:** "Your previous attempt used invalid table 'it'. Use ONLY: customers, orders, products..."
-- **Separation of Concerns:**
-  - **feedbacks.py** stores human-readable messages (easy to modify/translate)
-  - **error_feedback.py** handles error analysis logic (pattern matching)
+**Two-layer architecture for targeted error correction:**
+
+| Module                | Responsibility                                                    | Example                                                              |
+| --------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **error_feedback.py** | Analyzes error messages via regex, routes to appropriate feedback | Detects "unknown table 'it'" → calls `get_unknown_tables_feedback()` |
+| **feedbacks.py**      | Stores error-specific message templates (9 types)                 | Returns: "Use ONLY: customers, orders. No abbreviations."            |
+
+**Feedback Types:** Unknown tables, multiple statements, SQL comments, forbidden keywords, column not found, division by zero, datetime format, alias reference, parsing errors
 
 ---
 

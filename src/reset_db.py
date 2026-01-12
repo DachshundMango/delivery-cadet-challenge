@@ -60,10 +60,11 @@ def reset_database():
 
     load_dotenv()
 
-    # Get database connection from environment
-    DB_URL = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@localhost:5432/{os.getenv('DB_NAME')}"
-
     try:
+        # Use centralized DB config (includes validation)
+        from src.core.db import DatabaseConfig
+        DB_URL = DatabaseConfig.get_db_url()
+
         engine = create_engine(DB_URL)
 
         with engine.connect() as conn:

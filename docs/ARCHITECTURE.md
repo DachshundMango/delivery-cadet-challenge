@@ -3,6 +3,7 @@
 This document provides a comprehensive overview of Delivery Cadet's system design, component structure, and data flow.
 
 ## Table of Contents
+
 - [Project Structure](#project-structure)
 - [High-Level Architecture](#high-level-architecture)
 - [LangGraph Workflow](#langgraph-workflow)
@@ -20,11 +21,20 @@ cadet/
 ├── src/                          # Python backend source code
 │   ├── agent/                    # LangGraph agent workflow
 │   │   ├── __init__.py           # Public API exports
-│   │   ├── graph.py              # LangGraph workflow definition (115 LOC)
-│   │   ├── nodes.py              # Agent node implementations (889 LOC)
-│   │   ├── prompts.py            # LLM prompt templates
-│   │   ├── feedbacks.py          # Error feedback messages (306 LOC) 🆕
-│   │   ├── error_feedback.py     # Error feedback router (114 LOC) 🆕
+│   │   ├── graph.py              # LangGraph workflow definition (76 LOC)
+│   │   ├── nodes.py              # Agent node implementations (788 LOC)
+│   │   ├── prompts/              # Modular LLM prompt templates (655 LOC)
+│   │   │   ├── __init__.py       # Prompt exports
+│   │   │   ├── intent.py         # Intent classification & general responses (68 LOC)
+│   │   │   ├── sql.py            # SQL generation prompts (154 LOC)
+│   │   │   ├── visualization.py  # Chart & visualization prompts (87 LOC)
+│   │   │   ├── analysis.py       # Pyodide analysis prompts (63 LOC)
+│   │   │   └── privacy.py        # PII masking & response prompts (245 LOC)
+│   │   ├── helpers.py            # Reusable utilities (147 LOC)
+│   │   ├── config.py             # LLM instances & constants (63 LOC)
+│   │   ├── routing.py            # Conditional routing logic (106 LOC)
+│   │   ├── feedbacks.py          # Error feedback messages (306 LOC)
+│   │   ├── error_feedback.py     # Error feedback router (114 LOC)
 │   │   └── state.py              # State management schema (65 LOC)
 │   │
 │   ├── data_pipeline/            # ETL and data preparation (1,606 LOC)
@@ -79,11 +89,16 @@ cadet/
 │
 ├── docs/                         # Documentation
 │   ├── ERROR-HANDLING.md         # Error handling & retry logic
-│   ├── ARCHITECTURE.md           # This file
-│   └── sql.md                    # SQL patterns & examples
+│   ├── DEVELOPMENT.md            # Development guide & contributing
+│   └── ARCHITECTURE.md           # This file
 │
-├── tests/                        # Testing
-│   └── test_security.py          # Security validation tests
+├── tests/                        # Testing (672 LOC)
+│   ├── test_security.py          # Security validation tests (111 LOC)
+│   ├── agent/                    # Agent module tests
+│   │   ├── test_routing.py       # Routing logic tests (143 LOC)
+│   │   ├── test_helpers.py       # Helper utilities tests (185 LOC)
+│   │   └── test_config.py        # Configuration tests (100 LOC)
+│   └── README.md                 # Testing documentation
 │
 ├── docker-compose.yaml           # PostgreSQL + PgAdmin
 ├── langgraph.json                # LangGraph configuration
@@ -244,12 +259,7 @@ cadet/
                  └─────┘
 ```
 
-### Retry Mechanism (Updated 2026-01-11)
-
-**Evolution:**
-- **Before (2026-01-08):** Validation errors caused workflow termination without retry.
-- **After (2026-01-09):** Validation errors stored in `query_result` and trigger retry loop.
-- **After (2026-01-11):** Added Pyodide fallback mechanism and dedicated retry counter to prevent token overflow.
+### Retry Mechanism
 
 **Current Flow:**
 
@@ -293,8 +303,9 @@ validate_sql_query() (validation.py)
                               → "fallback" → enable_pyodide_fallback
 ```
 
-**Key Improvements:**
-1. **Dedicated Counter:** Uses `sql_retry_count` (NOT message array) to prevent token overflow
+**Key Features:**
+
+1. **Dedicated Counter:** Uses `sql_retry_count` state variable to prevent token overflow
 2. **Pyodide Fallback:** After 3 SQL failures, switches to simple SQL + Python analysis mode
 3. **Fallback Guard:** `pyodide_fallback_attempted` flag prevents infinite fallback loops
 4. **Targeted Feedback:** `error_feedback.py` provides specific hints based on error type
@@ -304,12 +315,14 @@ validate_sql_query() (validation.py)
 ## Key Components
 
 ### 1. Intent Classification
+
 - **Node:** `intent_classification`
 - **LLM Temperature:** 0.0 (deterministic)
 - **Purpose:** Routes between SQL generation and general conversation
 - **Output:** `"sql"` or `"general"`
 
-### 2. SQL Generation (Updated 2026-01-10)
+### 2. SQL Generation
+
 - **Node:** `generate_SQL`
 - **LLM Temperature:** 0.1 (accurate, low variance)
 - **Prompt Selection:** Conditional based on `needs_pyodide` flag
@@ -330,22 +343,23 @@ validate_sql_query() (validation.py)
   6. Parse XML response: `<reasoning>` + `<sql>`
   7. Validate SQL for security and correctness
 
-### 3. SQL Validation (validation.py - Updated 2026-01-10)
+### 3. SQL Validation (validation.py)
+
 - **Purpose:** Prevent SQL injection and ensure query correctness
 - **Checks:**
   1. Forbidden keywords (DROP, DELETE, UPDATE, etc.)
   2. Multiple statements (semicolon check)
-  3. Comments (-- or /* */)
+  3. Comments (-- or /\* \*/)
   4. Unknown table names (with CTE/alias filtering)
 - **Table Extraction Logic:**
   - Uses `sqlparse` to parse SQL into tokens
   - Skips `Function` and `Parenthesis` tokens to avoid false positives
-  - **Bug Fix (2026-01-10):** Previously, `EXTRACT(DOW FROM "dateTime")` was incorrectly extracting "datetime" as a table name due to recursive processing of function tokens
-  - **Solution:** Function/Parenthesis tokens are now skipped entirely without recursion
+  - **Implementation:** Function/Parenthesis tokens are skipped entirely without recursion to avoid extracting function arguments as table names
   - Only statement-level FROM/JOIN clauses are processed for table extraction
 - **On Error:** Raises `SQLGenerationError` with detailed debug logs
 
 ### 4. Query Execution
+
 - **Node:** `execute_SQL`
 - **Process:**
   1. Skip execution if validation error already in `query_result`
@@ -358,13 +372,15 @@ validate_sql_query() (validation.py)
   - Database errors: Increments `sql_retry_count`, stores error in `query_result`
 
 ### 5. Visualization Request Classification
+
 - **Node:** `visualisation_request_classification`
 - **LLM Temperature:** 0.0 (strict keyword detection)
 - **Keywords:** "chart", "graph", "plot", "visualize", "visualization", "draw"
 - **Default:** `"no"` (prevents over-generation)
 - **Chart Types:** bar (comparison), line (time series), pie (proportions)
 
-### 6. Pyodide Request Classification (Updated 2026-01-10)
+### 6. Pyodide Request Classification
+
 - **Node:** `pyodide_request_classification`
 - **Execution Order:** **BEFORE** SQL generation (prevents complex SQL when simple data fetch is needed)
 - **Method:** Keyword-based detection
@@ -380,6 +396,7 @@ validate_sql_query() (validation.py)
 - **Future Enhancement:** LLM-based classification with multilingual support
 
 ### 7. Chart Generation
+
 - **Technology:** Plotly.js + react-plotly.js
 - **Process:**
   1. Determine chart type from user question
@@ -389,6 +406,7 @@ validate_sql_query() (validation.py)
   5. Return Plotly JSON spec to frontend
 
 ### 8. In-Browser Python Execution
+
 - **Technology:** Pyodide (WebAssembly Python) + react-py
 - **Libraries:** pandas (data manipulation)
 - **Process:**
@@ -400,7 +418,8 @@ validate_sql_query() (validation.py)
 - **Security:** No server-side code execution
 - **Data Format:** CSV string injected directly into Python code to prevent JSON parsing overhead
 
-### 9. Pyodide Fallback Mechanism (Updated 2026-01-11) 🆕
+### 9. Pyodide Fallback Mechanism
+
 - **Node:** `enable_pyodide_fallback`
 - **Trigger:** After 3 consecutive SQL generation/execution failures
 - **Purpose:** Recover from complex SQL errors by simplifying the query strategy
@@ -416,13 +435,15 @@ validate_sql_query() (validation.py)
 - **Guard Mechanism:** If fallback also fails after 3 attempts, routes to `generate_response` with error message
 
 ### 10. Response Generation
+
 - **Node:** `generate_response`
 - **LLM Temperature:** 0.7 (natural, varied)
 - **Output Format:** `<answer>` + `<insight>` (XML tags)
 - **PII:** Already masked in data
 - **Streaming:** Real-time response streaming to frontend
 
-### 11. Error Feedback System 🆕
+### 11. Error Feedback System
+
 - **Architecture:** Two-layer system for targeted error correction
   - **feedbacks.py (306 LOC):** Message templates for each error type
   - **error_feedback.py (114 LOC):** Router that analyzes errors and selects appropriate feedback
@@ -488,7 +509,7 @@ validate_sql_query() (validation.py)
    → Streaming text response to user
 ```
 
-### Error Retry Flow (Updated 2026-01-11)
+### Error Retry Flow
 
 ```
 1. SQL Generation Attempt #1
@@ -516,7 +537,7 @@ validate_sql_query() (validation.py)
    → execute_SQL → Success
 ```
 
-### Pyodide Fallback Flow (Updated 2026-01-11) 🆕
+### Pyodide Fallback Flow
 
 ```
 1. SQL Generation Attempts #1, #2, #3
@@ -560,16 +581,19 @@ validate_sql_query() (validation.py)
 ## Dataset-Agnostic Design
 
 ### Core Principle
+
 **All table/column information is loaded from `schema_info.json` at runtime, not hardcoded in prompts.**
 
 ### Implementation
 
 1. **Schema Generation** (generate_schema.py)
+
    - Reads database metadata
    - Detects PII columns via LLM
    - Outputs `schema_info.json`
 
 2. **Runtime Loading** (nodes.py:95-120)
+
    ```python
    def load_schema_info() -> str:
        global _SCHEMA_CACHE
@@ -581,6 +605,7 @@ validate_sql_query() (validation.py)
    ```
 
 3. **Prompt Injection** (prompts.py:85-175)
+
    ```python
    def get_sql_generation_prompt(schema_info: str, user_question: str) -> str:
        return f"""
@@ -595,6 +620,7 @@ validate_sql_query() (validation.py)
    ```
 
 ### Benefits
+
 - ✅ Swap datasets by replacing CSVs and re-running pipeline
 - ✅ No code changes required for new schemas
 - ✅ Scalable to different domains (retail, healthcare, finance, etc.)
@@ -604,14 +630,24 @@ validate_sql_query() (validation.py)
 ## Module Responsibilities
 
 ### agent/ - LangGraph Workflow
+
 - **graph.py:** StateGraph definition, conditional edges, retry logic, Pyodide fallback routing
 - **nodes.py:** Node implementations, LLM calls, error handling, PII masking
-- **prompts.py:** LLM prompt templates (initial generation, simple/complex SQL modes)
-- **feedbacks.py:** Error feedback messages (306 LOC) - actual feedback strings for each error type
-- **error_feedback.py:** Error feedback router (114 LOC) - analyzes errors and routes to appropriate feedback
+- **prompts/:** Modular LLM prompt templates organized by function
+  - **intent.py:** Intent classification & general conversation responses
+  - **sql.py:** SQL generation prompts (complex & simple modes for Pyodide)
+  - **visualization.py:** Chart request detection & title generation
+  - **analysis.py:** Pyodide analysis code generation prompts
+  - **privacy.py:** PII masking & natural language response formatting
+- **helpers.py:** Reusable utilities (schema caching, DB engine pooling, PII masking)
+- **config.py:** LLM instances with task-specific temperatures & workflow constants
+- **routing.py:** Conditional routing logic (RouteDecider class with static methods)
+- **feedbacks.py:** Error feedback messages - actual feedback strings for each error type
+- **error_feedback.py:** Error feedback router - analyzes errors and routes to appropriate feedback
 - **state.py:** TypedDict schema for state management (includes fallback flags and retry counters)
 
 ### core/ - Shared Utilities
+
 - **validation.py:** SQL security checks, table name validation
 - **db.py:** Database connection pooling (singleton pattern)
 - **logger.py:** Structured logging configuration
@@ -619,6 +655,7 @@ validate_sql_query() (validation.py)
 - **console.py:** CLI output formatting
 
 ### data_pipeline/ - ETL
+
 - **profiler.py:** Analyze CSV structure and statistics
 - **relationship_discovery.py:** Suggest FK relationships (interactive)
 - **load_data.py:** CSV → PostgreSQL with constraints
@@ -633,21 +670,25 @@ validate_sql_query() (validation.py)
 ## Performance Optimizations
 
 ### 1. Caching
+
 - **Schema:** Loaded once, cached globally (`_SCHEMA_CACHE`)
 - **Database Engine:** Connection pool reused (`_DB_ENGINE`)
-- **Frontend:** Plotly chart memoized (React.memo)
+- **Frontend:** Chart stability via revision prop and explicit sizing
 
 ### 2. Temperature Tuning
+
 - **Intent (0.0):** Deterministic routing
 - **SQL (0.1):** Accurate, minimal hallucination
 - **Visualization (0.0):** Strict keyword matching
 - **Response (0.7):** Natural, varied language
 
 ### 3. Streaming
+
 - **LangGraph Server:** Real-time response streaming
 - **Frontend:** Progressive UI updates
 
 ### 4. Connection Pooling
+
 - **SQLAlchemy:** pool_size=5, max_overflow=10
 - **Reuses connections** across requests
 
@@ -656,23 +697,27 @@ validate_sql_query() (validation.py)
 ## Security Layers
 
 ### 1. SQL Injection Prevention (validation.py)
+
 - Forbidden keyword blocking
 - Multiple statement prevention
 - Comment removal
 - Table name whitelist validation
 
 ### 2. PII Masking (nodes.py:128-194)
+
 - LLM-based detection during schema generation
 - Deterministic masking at query execution
 - Person names → "Person #N" (sequential)
 - Organization names preserved
 
 ### 3. Read-Only Access
+
 - Only SELECT queries allowed
 - No write operations (INSERT, UPDATE, DELETE)
 - No schema modifications (CREATE, ALTER, DROP)
 
 ### 4. Rate Limiting
+
 - Max retry limit: 3 attempts
 - Prevents infinite loops
 
@@ -681,22 +726,26 @@ validate_sql_query() (validation.py)
 ## Technology Choices
 
 ### Why LangGraph?
+
 - **State Management:** Built-in state persistence
 - **Conditional Routing:** Easy error handling with conditional edges
 - **Streaming:** Native streaming support
 - **Debugging:** LangSmith integration for trace visualization
 
 ### Why Cerebras (llama-3.3-70b)?
+
 - **Performance:** Fast inference (previously Groq)
 - **OpenAI-compatible API:** Easy integration
 - **Cost-effective:** Competitive pricing
 
 ### Why PostgreSQL?
+
 - **Relational:** Strong FK constraint support
 - **JSON Support:** Native JSON column types
 - **Mature:** Well-documented, stable
 
 ### Why Next.js 15?
+
 - **App Router:** Server components, streaming
 - **React 19:** Latest features (concurrent rendering)
 - **TypeScript:** Type safety
@@ -706,18 +755,9 @@ validate_sql_query() (validation.py)
 ## Related Documentation
 
 - [Error Handling Guide](ERROR-HANDLING.md) - SQL validation, retry logic, debugging
-- [Development Guide](DEVELOPMENT.md) - Contributing and extending *(coming soon)*
-- [SQL Reference](sql.md) - SQL patterns and examples
+- [Development Guide](DEVELOPMENT.md) - Contributing and extending
 - README.md - User setup and usage
 
 ---
 
 **Last Updated:** 2026-01-11
-**Version:** 1.2
-**Recent Changes:**
-- Added Pyodide fallback mechanism: Recovers from 3 consecutive SQL failures by switching to simple SQL + Python analysis
-- Introduced dedicated retry counter (`sql_retry_count`) to prevent token overflow from message accumulation
-- Added fallback guard flag (`pyodide_fallback_attempted`) to prevent infinite fallback loops
-- Updated workflow diagram to reflect actual implementation in graph.py
-- CSV data injection for Pyodide analysis (replacing JSON format for efficiency)
-- Enhanced error retry flow documentation with fallback strategy

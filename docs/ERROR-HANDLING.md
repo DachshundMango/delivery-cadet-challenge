@@ -546,10 +546,8 @@ Don't add fuzzy matching to "help" the LLM - it masks real issues. Let retry mec
 
 - [Architecture Guide](ARCHITECTURE.md) - System design and workflow
 - [Development Guide](DEVELOPMENT.md) - Contributing and extending
-- [SQL Reference](sql.md) - SQL generation patterns
 - README.md - User setup and usage
 
 ---
 
-**Last Updated:** 2026-01-09
-**Author:** Development Team
+**Last Updated:** 2026-01-11

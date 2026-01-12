@@ -94,7 +94,10 @@ src/
 |------|---------|---------------|
 | `agent/graph.py` | Workflow structure | Adding new nodes or edges |
 | `agent/nodes.py` | Node implementations | Changing node logic |
-| `agent/prompts.py` | LLM prompts | Improving SQL generation |
+| `agent/prompts/` | LLM prompts | Improving SQL generation |
+| `agent/helpers.py` | Utility functions | Caching or PII logic |
+| `agent/config.py` | LLM configuration | Temperature tuning |
+| `agent/routing.py` | Conditional routing | Modifying edge logic |
 | `agent/feedbacks.py` | Error feedbacks | Enhancing error messages |
 | `core/validation.py` | SQL security | Adding validation rules |
 | `data_pipeline/generate_schema.py` | Schema generation | Changing schema format |
@@ -610,7 +613,6 @@ langgraph dev
 
 - [Architecture Guide](ARCHITECTURE.md) - System design and components
 - [Error Handling Guide](ERROR-HANDLING.md) - Validation and retry logic
-- [SQL Reference](sql.md) - SQL patterns and examples
 - README.md - User setup and usage
 
 ---
@@ -625,5 +627,4 @@ langgraph dev
 
 ---
 
-**Last Updated:** 2026-01-09
-**Maintainer:** Development Team
+**Last Updated:** 2026-01-11

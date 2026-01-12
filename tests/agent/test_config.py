@@ -79,10 +79,18 @@ class TestConfigurationConstants:
     def test_valid_chart_types_contains_pie(self):
         """Valid chart types should include 'pie'."""
         assert 'pie' in VALID_CHART_TYPES
-    
+
+    def test_valid_chart_types_contains_scatter(self):
+        """Valid chart types should include 'scatter'."""
+        assert 'scatter' in VALID_CHART_TYPES
+
+    def test_valid_chart_types_contains_area(self):
+        """Valid chart types should include 'area'."""
+        assert 'area' in VALID_CHART_TYPES
+
     def test_valid_chart_types_count(self):
-        """Should have exactly 3 valid chart types."""
-        assert len(VALID_CHART_TYPES) == 3
+        """Should have exactly 5 valid chart types."""
+        assert len(VALID_CHART_TYPES) == 5
     
     def test_valid_chart_types_is_set(self):
         """VALID_CHART_TYPES should be a set for efficient lookup."""
@@ -90,9 +98,9 @@ class TestConfigurationConstants:
     
     def test_invalid_chart_types_not_included(self):
         """Invalid chart types should not be in VALID_CHART_TYPES."""
-        assert 'scatter' not in VALID_CHART_TYPES
         assert 'histogram' not in VALID_CHART_TYPES
         assert 'bubble' not in VALID_CHART_TYPES
+        assert 'heatmap' not in VALID_CHART_TYPES
     
     def test_llm_model_is_llama(self):
         """Should use llama-3.3-70b model by default."""

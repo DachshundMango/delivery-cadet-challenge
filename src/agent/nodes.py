@@ -775,7 +775,28 @@ def generate_response(state: SQLAgentState) -> dict:
 
     # Get prompt from prompts module
     needs_pyodide = state.get('needs_pyodide', False)
-    response_prompt = get_response_generation_prompt(question, result, needs_pyodide)
+
+    # When Pyodide is performing analysis, send metadata instead of truncated data
+    if needs_pyodide:
+        try:
+            data_list = json.loads(result)
+            if data_list and len(data_list) > 0:
+                # Create metadata summary instead of sending truncated raw data
+                metadata = {
+                    "row_count": len(data_list),
+                    "columns": list(data_list[0].keys()) if isinstance(data_list[0], dict) else [],
+                    "sample_rows": data_list[:2]  # Only first 2 rows as structure example
+                }
+                result_for_prompt = json.dumps(metadata, indent=2)
+                logger.info(f"Pyodide mode: Sending metadata ({len(data_list)} rows) instead of full data")
+            else:
+                result_for_prompt = result
+        except (json.JSONDecodeError, KeyError, IndexError):
+            result_for_prompt = result
+    else:
+        result_for_prompt = result
+
+    response_prompt = get_response_generation_prompt(question, result_for_prompt, needs_pyodide)
 
     response = llm_response.invoke(response_prompt)  # Temperature: 0.7 (natural & varied)
     raw_content = response.content.strip()

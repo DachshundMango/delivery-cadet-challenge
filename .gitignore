@@ -1,6 +1,7 @@
 # Archive
 archive/
 private/
+backup/
 
 # Generated schema files
 src/schema_info.json

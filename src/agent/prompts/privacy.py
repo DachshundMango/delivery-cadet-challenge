@@ -146,21 +146,26 @@ def get_response_generation_prompt(question: str, result: str, needs_pyodide: bo
     Returns:
         Formatted prompt string
     """
-    # Truncate result to prevent prompt overflow
-    truncated_result = result[:1000] if len(result) > 1000 else result
+    # For Pyodide: result is metadata. For normal: truncate to 1000 chars
+    truncated_result = result if needs_pyodide else (result[:1000] if len(result) > 1000 else result)
 
     pyodide_instruction = ""
     if needs_pyodide:
         pyodide_instruction = """
-        **CRITICAL INSTRUCTION FOR PYTHON ANALYSIS:**
-        The user has requested a complex analysis that is being performed by a Python script (Pyodide).
-        The SQL result provided here might be raw data for that script, NOT the final answer.
-        
-        Therefore:
-        1. DO NOT say "information is missing" or "cannot be determined".
-        2. Briefly explain what the data represents.
-        3. Explicitly mention that "Advanced statistical analysis is being generated in the Python console below."
-        4. Focus on the structure of the data rather than the final calculated value (which Python will compute).
+        **PYTHON ANALYSIS MODE:**
+        Data format: {"row_count": N, "columns": [...], "sample_rows": [2 examples]}
+
+        ANSWER RULES:
+        - Use row_count for total records (NOT the sample_rows length!)
+        - List columns, mention row_count, then say: "Advanced statistical analysis is being generated in the Python console below."
+        - DO NOT count, calculate percentages, or analyze patterns from sample_rows
+
+        INSIGHT RULES (Pyodide mode):
+        - Keep it to ONE sentence only
+        - Comment ONLY on data structure (e.g., "The dataset includes timestamp and ID fields enabling temporal analysis.")
+        - DO NOT use speculative words: "may", "could", "might", "suggests"
+        - DO NOT analyze sample_rows or mention "no patterns detected"
+        - Focus on what columns exist and what type of analysis they enable
         """
 
     return f"""You are a data analyst converting SQL results into natural language. Think step-by-step before responding.

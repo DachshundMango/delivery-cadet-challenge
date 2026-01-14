@@ -3,10 +3,6 @@ archive/
 private/
 backup/
 
-# Generated schema files
-src/schema_info.json
-src/schema_info.md
-
 # Python
 __pycache__/
 *.pyc
@@ -16,8 +12,8 @@ __pycache__/
 .env
 venv/
 
-# Generated data
-src/data_profile.json
-
 # LangGraph API
 .langgraph_api/
+
+.claude/
+.cursor/

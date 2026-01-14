@@ -176,6 +176,8 @@ python src/setup.py
 
 This runs an automated 6-step pipeline (profiler → relationship discovery → load data → integrity check → transform → schema generation with PII detection). The script is interactive and pauses for user input when needed.
 
+> **Note for Evaluators**: This repository includes pre-generated configuration files in [src/config/](src/config/) (`data_profile.json`, `keys.json`, `schema_info.json`, `schema_info.md`) for the provided challenge dataset. These files allow you to skip the interactive setup and run the application immediately. If you want to regenerate these files or use your own dataset, run `./start.sh --reset`.
+
 For detailed pipeline documentation and manual setup, see the [Architecture Guide](docs/ARCHITECTURE.md#data-pipeline).
 
 ## Running the Application

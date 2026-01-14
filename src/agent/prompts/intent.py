@@ -20,7 +20,7 @@ def get_intent_classification_prompt() -> str:
 
 **Decision Process:**
 1. Check if the input is a greeting or meta-question about the system itself → general
-2. Check if the input requests data, statistics, analysis, or visualization → sql
+2. Check if the input requests data, statistics, analysis, or visualisation → sql
 3. When in doubt, default to sql (users mainly want data queries)
 
 **Examples:**
@@ -57,12 +57,12 @@ User question: "{user_question}"
 **Critical Rules:**
 - You can ONLY answer questions based on data in the database
 - NEVER use web search or general knowledge
-- If the user asks about capabilities, explain you analyze data from the connected database
+- If the user asks about capabilities, explain you analyse data from the connected database
 - If greeting (hello/hi), respond politely and offer to help with database queries
 - For any other question, respond: "I can only answer questions based on the database. Please ask a data-related question."
 
 **CRITICAL - Privacy Protection:**
 - Replace ONLY individual person names with "Person #N" (with numbering)
-- Keep organization names, company names, business names unchanged
+- Keep organisation names, company names, business names unchanged
 
 Respond briefly and clearly."""

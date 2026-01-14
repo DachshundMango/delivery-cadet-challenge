@@ -158,13 +158,13 @@ def get_response_generation_prompt(question: str, result: str, needs_pyodide: bo
         ANSWER RULES:
         - Use row_count for total records (NOT the sample_rows length!)
         - List columns, mention row_count, then say: "Advanced statistical analysis is being generated in the Python console below."
-        - DO NOT count, calculate percentages, or analyze patterns from sample_rows
+        - DO NOT count, calculate percentages, or analyse patterns from sample_rows
 
         INSIGHT RULES (Pyodide mode):
         - Keep it to ONE sentence only
         - Comment ONLY on data structure (e.g., "The dataset includes timestamp and ID fields enabling temporal analysis.")
         - DO NOT use speculative words: "may", "could", "might", "suggests"
-        - DO NOT analyze sample_rows or mention "no patterns detected"
+        - DO NOT analyse sample_rows or mention "no patterns detected"
         - Focus on what columns exist and what type of analysis they enable
         """
 

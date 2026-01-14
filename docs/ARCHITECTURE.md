@@ -91,7 +91,7 @@ cadet/
 │   │   │   ├── __init__.py       # Prompt exports
 │   │   │   ├── intent.py         # Intent classification & general responses (68 LOC)
 │   │   │   ├── sql.py            # SQL generation prompts (154 LOC)
-│   │   │   ├── visualization.py  # Chart & visualization prompts (87 LOC)
+│   │   │   ├── visualization.py  # Chart & visualisation prompts (87 LOC)
 │   │   │   ├── analysis.py       # Pyodide analysis prompts (63 LOC)
 │   │   │   └── privacy.py        # PII masking & response prompts (245 LOC)
 │   │   ├── helpers.py            # Reusable utilities (147 LOC)
@@ -134,7 +134,7 @@ cadet/
 │   ├── src/
 │   │   ├── app/                  # Next.js App Router
 │   │   ├── components/           # React components
-│   │   │   ├── plotly-chart.tsx  # Plotly visualization
+│   │   │   ├── plotly-chart.tsx  # Plotly visualisation
 │   │   │   └── python-runner.tsx # Pyodide runtime
 │   │   ├── providers/            # Context providers & LangGraph client
 │   │   └── hooks/                # Custom React hooks
@@ -625,7 +625,7 @@ state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
 ### 5. Visualization Request Classification
 
 - **Node:** `visualisation_request_classification`
-- **Detection:** Keyword-based (chart, graph, plot, visualize)
+- **Detection:** Keyword-based (chart, graph, plot, visualise)
 - **Chart Types:** bar, line, pie, scatter, area
 
 ### 6. Pyodide Request Classification
@@ -864,7 +864,7 @@ state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
 - **State Management:** Built-in state persistence
 - **Conditional Routing:** Easy error handling with conditional edges
 - **Streaming:** Native streaming support
-- **Debugging:** LangSmith integration for trace visualization
+- **Debugging:** LangSmith integration for trace visualisation
 
 ### Why Cerebras (llama-3.3-70b)?
 
@@ -886,10 +886,35 @@ state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
 
 ---
 
+## Running the Application
+
+### Quick Start
+
+The easiest way to start the application:
+
+```bash
+./start.sh
+```
+
+This automatically starts both LangGraph server (port 2024) and frontend (port 3000), then opens http://localhost:3000 in your browser. On first run, it automatically sets up the database through an interactive pipeline.
+
+**Reset and start fresh:**
+
+```bash
+./start.sh --reset
+```
+
+This drops all tables, clears config files, and re-runs the setup pipeline.
+
+> **📚 For detailed setup instructions, see [SETUP_GUIDE.md](../SETUP_GUIDE.md)** - includes exact inputs needed for the provided dataset (approximately 5 minutes).
+
+---
+
 ## Related Documentation
 
 - [Error Handling Guide](ERROR-HANDLING.md) - SQL validation, retry logic, debugging
 - [Development Guide](DEVELOPMENT.md) - Contributing and extending
+- [Setup Guide](../SETUP_GUIDE.md) - Interactive data pipeline setup guide
 - README.md - User setup and usage
 
 ---

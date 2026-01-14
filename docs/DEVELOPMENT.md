@@ -609,10 +609,47 @@ langgraph dev
 
 ---
 
+## Running the Application
+
+### Quick Start with Reset
+
+To start the application with a fresh database:
+
+```bash
+./start.sh --reset
+```
+
+This drops all tables, clears config files, and re-runs the setup pipeline (approximately 5 minutes).
+
+> **📚 For detailed setup instructions, see [SETUP_GUIDE.md](../SETUP_GUIDE.md)** - includes exact inputs needed for the provided dataset.
+
+### Manual Setup
+
+If you prefer to run components separately:
+
+```bash
+# Terminal 1: LangGraph server
+langgraph dev
+
+# Terminal 2: Frontend
+cd frontend && pnpm dev
+```
+
+### CLI Mode
+
+For quick queries without UI:
+
+```bash
+python src/cli.py
+```
+
+---
+
 ## Related Documentation
 
 - [Architecture Guide](ARCHITECTURE.md) - System design and components
 - [Error Handling Guide](ERROR-HANDLING.md) - Validation and retry logic
+- [Setup Guide](../SETUP_GUIDE.md) - Interactive data pipeline setup guide
 - README.md - User setup and usage
 
 ---
@@ -633,7 +670,7 @@ langgraph dev
 
 1. **Limited Chart Types**: Currently supports bar, line, pie, scatter, and area charts
    - Heatmaps, box plots, histograms, and other advanced visualisations not yet implemented
-   - Workaround: Use Pyodide mode for custom visualizations with matplotlib (when implemented)
+   - Workaround: Use Pyodide mode for custom visualisations with matplotlib (when implemented)
 
 2. **Pyodide Performance**: Python execution triggered by keyword matching
    - Simple keyword-based classification may miss nuanced analysis requests

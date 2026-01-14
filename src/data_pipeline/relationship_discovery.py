@@ -2,7 +2,7 @@
 Relationship Discovery
 
 This interactive tool assists users in defining Primary Keys (PK) and Foreign Keys (FK)
-for the dataset. It analyzes column names and statistics to suggest likely relationships,
+for the dataset. It analyses column names and statistics to suggest likely relationships,
 which are then confirmed by the user and saved to `keys.json`.
 
 Workflow:

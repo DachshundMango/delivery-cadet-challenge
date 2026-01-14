@@ -546,6 +546,7 @@ Don't add fuzzy matching to "help" the LLM - it masks real issues. Let retry mec
 
 - [Architecture Guide](ARCHITECTURE.md) - System design and workflow
 - [Development Guide](DEVELOPMENT.md) - Contributing and extending
+- [Setup Guide](../SETUP_GUIDE.md) - Interactive data pipeline setup guide
 - README.md - User setup and usage
 
 ---

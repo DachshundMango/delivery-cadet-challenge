@@ -9,7 +9,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 **Key capabilities include:**
 
 - Natural language to SQL conversion with automatic retry
-- Interactive data visualization (bar, line, pie, scatter, area charts)
+- Interactive data visualisation (bar, line, pie, scatter, area charts)
 - In-browser Python execution for advanced analytics
 - Automated ETL pipeline with PII detection and masking
 - Dataset-agnostic design for easy adaptation
@@ -43,6 +43,8 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Cerebras API key** (free tier at [Cerebras Cloud](https://cloud.cerebras.ai))
 - **LangSmith API key** (optional, for tracing - free tier at [LangSmith](https://smith.langchain.com))
 
+> **Windows Users**: This project uses Bash scripts. Please use **Git Bash** (included with Git for Windows) or **WSL** (Windows Subsystem for Linux) to run the scripts.
+
 ## Installation & Setup
 
 ### 1. Clone the Repository
@@ -57,7 +59,11 @@ cd cadet
 Copy `.env.example` to `.env` and configure your credentials:
 
 ```bash
+# Mac/Linux/Git Bash
 cp .env.example .env
+
+# Windows CMD (if not using Git Bash)
+copy .env.example .env
 ```
 
 Then edit `.env` with your actual values:
@@ -136,7 +142,11 @@ cd ..
 Copy the frontend environment example file:
 
 ```bash
+# Mac/Linux/Git Bash
 cp frontend/.env.example frontend/.env.local
+
+# Windows CMD (if not using Git Bash)
+copy frontend\.env.example frontend\.env.local
 ```
 
 The default values are suitable for local development. You only need to change them if:
@@ -177,6 +187,8 @@ For detailed pipeline documentation and manual setup, see the [Architecture Guid
 ```
 
 This automatically starts both LangGraph server (port 2024) and frontend (port 3000), then opens http://localhost:3000 in your browser. On first run, it will automatically set up the database.
+
+> **Note**: Windows users should run this command in Git Bash or WSL.
 
 **Reset and start fresh:**
 
@@ -231,8 +243,9 @@ This will drop all database tables, delete config files, and re-run the entire p
 - **Schema not found**: Run `python src/setup.py`
 - **Database connection error**: Check if PostgreSQL is running with `docker-compose ps`
 - **Port conflict**: Edit `langgraph.json` to use a different port
-- **Permission denied (./start.sh)**: Run `chmod +x start.sh` first
+- **Permission denied (./start.sh)**: Run `chmod +x start.sh` first (Mac/Linux/Git Bash only)
 - **Module not found errors**: Make sure you've installed all dependencies with `pip install -r requirements.txt`
+- **Windows issues**: Ensure you're using Git Bash or WSL, not CMD or PowerShell
 
 For detailed troubleshooting, see the [Development Guide](docs/DEVELOPMENT.md#troubleshooting).
 

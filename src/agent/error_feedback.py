@@ -1,7 +1,7 @@
 """
 Error feedback routing for SQL generation retry logic.
 
-This module analyzes SQL error messages and returns targeted feedback strings
+This module analyses SQL error messages and returns targeted feedback strings
 to help the LLM correct its query generation on retry attempts.
 
 The error feedback system provides specific guidance based on:

@@ -377,28 +377,28 @@ def execute_SQL(state: SQLAgentState) -> dict:
 def visualisation_request_classification(state: SQLAgentState) -> dict:
     """
     Determine if a chart is needed and select the appropriate type.
-    
-    Analyzes the user's question and the SQL results to decide if visualization
+
+    Analyses the user's question and the SQL results to decide if visualisation
     adds value. If yes, it generates the Plotly JSON configuration.
-    
+
     Args:
         state: Current workflow state (requires query_result, intent)
-        
+
     Returns:
-        dict: Updates to state with 'plotly_data' (JSON string or None) 
+        dict: Updates to state with 'plotly_data' (JSON string or None)
               and optional ToolMessage.
     """
     user_question = state.get('user_question', '')
     sql_result = state.get('query_result', '')
     intent = state.get('intent', '')
 
-    # Skip visualization for non-SQL queries or errors
+    # Skip visualisation for non-SQL queries or errors
     if intent != 'sql' or not sql_result or 'Error:' in sql_result:
-        logger.info("Skipping visualization (non-SQL or error)")
+        logger.info("Skipping visualisation (non-SQL or error)")
         return {"plotly_data": None}
 
     if sql_result in ['[]', '', 'null']:
-        logger.info("Skipping visualization (empty result)")
+        logger.info("Skipping visualisation (empty result)")
         return {"plotly_data": None}
 
     try:
@@ -504,6 +504,7 @@ def create_plotly_chart(sql_result, chart_type, title=None, user_question=""):
         title = user_question.replace("show me", "").replace("Show me", "")
         title = title.replace("create a chart", "").replace("Create a chart", "")
         title = title.replace("create a bar chart", "").replace("Create a bar chart", "")
+        title = title.replace("visualise", "").replace("Visualise", "")
         title = title.replace("visualize", "").replace("Visualize", "")
         title = title.replace("make a graph", "").replace("Make a graph", "")
         title = title.strip()

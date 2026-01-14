@@ -1,8 +1,8 @@
 """
-Visualization and chart generation prompts.
+Visualisation and chart generation prompts.
 
 This module contains prompts for:
-- Determining if visualization is needed
+- Determining if visualisation is needed
 - Generating chart titles
 - Classifying chart types
 """
@@ -30,7 +30,7 @@ Title:"""
 
 def get_visualization_prompt(user_question: str, sql_result: str) -> str:
     """
-    Generate prompt to determine if visualization is needed.
+    Generate prompt to determine if visualisation is needed.
 
     Args:
         user_question: The user's original question
@@ -42,27 +42,27 @@ def get_visualization_prompt(user_question: str, sql_result: str) -> str:
     # Truncate result to prevent prompt overflow
     truncated_result = sql_result[:200] + "..." if len(sql_result) > 200 else sql_result
 
-    return f"""You are a strict visualization classifier. Your DEFAULT answer is "no".
+    return f"""You are a strict visualisation classifier. Your DEFAULT answer is "no".
 
 **CRITICAL RULE: DEFAULT = NO**
-Only return "yes" if the user EXPLICITLY requests a visualization using specific keywords.
+Only return "yes" if the user EXPLICITLY requests a visualisation using specific keywords.
 
 **Question:** {user_question}
 **Data sample:** {truncated_result}
 
 **Decision Logic:**
 
-**Return "yes" ONLY if user question contains EXPLICIT visualization keywords:**
-- "chart", "graph", "plot", "visualize", "visualization", "draw", "create a chart", "make a graph", "show me a chart"
+**Return "yes" ONLY if user question contains EXPLICIT visualisation keywords:**
+- "chart", "graph", "plot", "visualise", "visualisation", "visualize", "visualization", "draw", "create a chart", "make a graph", "show me a chart"
 
 **Return "no" for ALL other cases, including:**
 - Questions about trends, comparisons, distributions WITHOUT explicit chart keywords
   Example: "What are the sales trends?" → NO (no chart keyword)
   Example: "Show me top 10 customers" → NO (no chart keyword)
   Example: "Compare revenue across regions" → NO (no chart keyword)
-- User explicitly says NOT to visualize
+- User explicitly says NOT to visualise
   Example: "Don't make a chart, just show the data" → NO
-  Example: "No visualization needed" → NO
+  Example: "No visualisation needed" → NO
 - Simple data requests (list, show, get, find)
   Example: "List all products" → NO
   Example: "Show me the total revenue" → NO
@@ -71,7 +71,7 @@ Only return "yes" if the user EXPLICITLY requests a visualization using specific
 "What are the top 10 products by sales?" → {{"visualise": "no"}}
 "Show me revenue trends over time" → {{"visualise": "no"}}
 "Create a bar chart of top 10 products" → {{"visualise": "yes", "chart_type": "bar"}}
-"Visualize the sales by region" → {{"visualise": "yes", "chart_type": "bar"}}
+"Visualise the sales by region" → {{"visualise": "yes", "chart_type": "bar"}}
 "Don't make a chart, just show the numbers" → {{"visualise": "no"}}
 "Compare A and B" → {{"visualise": "no"}}
 

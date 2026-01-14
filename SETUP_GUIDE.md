@@ -4,6 +4,8 @@
 
 > **Note**: This guide assumes you are using the provided challenge dataset. If you are using your own data, the specific inputs will differ, but the overall process remains the same.
 
+> **Windows Users**: This setup uses Bash scripts. Please ensure you're running commands in **Git Bash** or **WSL**, not CMD or PowerShell.
+
 ## Overview
 
 The data pipeline consists of 6 automated steps, with 2 requiring user interaction:
@@ -222,6 +224,8 @@ The pipeline will then proceed to:
 # After setup is complete, run in CLI mode
 python src/cli.py
 ```
+
+> **Windows Users**: Run these commands in Git Bash or WSL, not CMD or PowerShell.
 
 ---
 

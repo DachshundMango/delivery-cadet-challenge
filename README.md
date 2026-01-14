@@ -35,13 +35,15 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 
 ## Prerequisites
 
-- **Python 3.10+**
+- **Python 3.10+** with **Conda/Miniconda recommended** (see note below)
 - **Node.js 18+**
 - **Docker & Docker Compose** (for PostgreSQL database)
   - [Install Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - **pnpm** (installed via npm)
 - **Cerebras API key** (free tier at [Cerebras Cloud](https://cloud.cerebras.ai))
 - **LangSmith API key** (optional, for tracing - free tier at [LangSmith](https://smith.langchain.com))
+
+> **⚠️ Python Environment**: This project has been tested with **Conda/Miniconda**. While venv may work, Conda is recommended for dependency compatibility. [Install Miniconda](https://docs.conda.io/en/latest/miniconda.html)
 
 > **Windows Users**: This project uses Bash scripts. Please use **Git Bash** (included with Git for Windows) or **WSL** (Windows Subsystem for Linux) to run the scripts.
 
@@ -51,7 +53,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 
 ```bash
 git clone https://github.com/DachshundMango/delivery-cadet-challenge.git
-cd cadet
+cd delivery-cadet-challenge
 ```
 
 ### 2. Environment Variables

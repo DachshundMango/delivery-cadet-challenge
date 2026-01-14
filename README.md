@@ -16,6 +16,23 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 
 > **📚 For detailed features, tech stack, and system architecture, see the [Architecture Guide](docs/ARCHITECTURE.md).**
 
+---
+
+> ## ⚠️ **IMPORTANT: First-Time Setup Required**
+>
+> **Before running the application for the first time, you MUST complete the interactive data pipeline setup.**
+>
+> 📖 **See [SETUP_GUIDE.md](SETUP_GUIDE.md) for step-by-step instructions with exact inputs needed for the provided dataset.**
+>
+> The guide includes:
+> - Primary & Foreign Key configuration
+> - SQL transformations for data integrity
+> - PII detection setup
+>
+> Simply follow the guide when running `./start.sh` for the first time.
+
+---
+
 ## Prerequisites
 
 - **Python 3.10+**
@@ -226,6 +243,18 @@ For detailed system documentation and developer guides, see the [docs/](docs/) f
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - System design, LangGraph workflow, project structure, and component details
 - **[Error Handling Guide](docs/ERROR-HANDLING.md)** - SQL validation, error types, retry mechanism, and debugging
 - **[Development Guide](docs/DEVELOPMENT.md)** - Development setup, contributing, testing, limitations, and roadmap
+
+---
+
+> ## ⚠️ **Setup Reminder**
+>
+> **If you're setting up this project for the first time or encountering data-related issues:**
+>
+> 📖 **Refer to [SETUP_GUIDE.md](SETUP_GUIDE.md)** for the complete interactive data pipeline setup guide.
+>
+> This guide provides exact inputs for the challenge dataset and explains each step in detail.
+
+---
 
 ## License
 

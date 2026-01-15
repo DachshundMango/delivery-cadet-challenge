@@ -35,7 +35,7 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 
 ## Prerequisites
 
-- **Python 3.10+** with **Conda/Miniconda recommended** (see note below)
+- **Python 3.12** with **Conda/Miniconda** ([Install Guide](https://docs.conda.io/en/latest/miniconda.html))
 - **Node.js 18+**
 - **Docker & Docker Compose** (for PostgreSQL database)
   - [Install Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -43,9 +43,9 @@ Delivery Cadet is an intelligent SQL agent that converts natural language questi
 - **Cerebras API key** (free tier at [Cerebras Cloud](https://cloud.cerebras.ai))
 - **LangSmith API key** (optional, for tracing - free tier at [LangSmith](https://smith.langchain.com))
 
-> **⚠️ Python Environment**: This project has been tested with **Conda/Miniconda**. While venv may work, Conda is recommended for dependency compatibility. [Install Miniconda](https://docs.conda.io/en/latest/miniconda.html)
+> **⚠️ Development Environment**: This project was **developed and tested with Conda on macOS**. Windows compatibility has been verified, but if you encounter any issues, please contact **tedbae0504@gmail.com**.
 
-> **Windows Users**: This project uses Bash scripts. Please use **Git Bash** (included with Git for Windows) or **WSL** (Windows Subsystem for Linux) to run the scripts.
+> **Windows Users**: This project uses Bash scripts. Please use **Git Bash** (included with Git for Windows). You may need to run `chmod +x start.sh` before executing the start script.
 
 ## Installation & Setup
 
@@ -99,23 +99,7 @@ PGADMIN_DEFAULT_PASSWORD=admin
 
 ### 3. Install Python Dependencies
 
-**Using pip with virtual environment (Recommended)**
-
-```bash
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate  # Mac/Linux
-# venv\Scripts\activate   # Windows
-
-# Install all dependencies
-pip install -r requirements.txt
-```
-
-> **Note:** The `requirements.txt` specifies core packages with pinned versions. Pip automatically installs all transitive dependencies (~150 additional packages) with compatible versions.
-
-**Alternative: Using Conda**
-
-If you prefer conda:
+**Using Conda:**
 
 ```bash
 # Create conda environment with Python 3.12
@@ -125,6 +109,8 @@ conda activate cadet
 # Install dependencies via pip
 pip install -r requirements.txt
 ```
+
+> **Note:** The `requirements.txt` specifies core packages with pinned versions. Pip automatically installs all transitive dependencies with compatible versions.
 
 ### 4. Install Frontend Dependencies
 
@@ -170,17 +156,35 @@ This will start:
 
 ## Database Setup
 
-The easiest way to set up your database:
+> **⚠️ IMPORTANT FOR EVALUATORS**: While this repository includes pre-generated configuration files in [src/config/](src/config/) as **reference**, please **backup these files** and run the full setup to experience the complete data pipeline:
+
+**Recommended first-time setup:**
+
+```bash
+./start.sh --reset
+```
+
+This will:
+1. Drop all tables and clear config files
+2. Run the interactive 6-step pipeline (profiler → relationship discovery → load data → integrity check → transform → schema generation with PII detection)
+3. Load the complete dataset into your local database
+4. Generate fresh configuration files
+
+**Alternative - Manual setup:**
 
 ```bash
 python src/setup.py
 ```
 
-This runs an automated 6-step pipeline (profiler → relationship discovery → load data → integrity check → transform → schema generation with PII detection). The script is interactive and pauses for user input when needed.
+**After setup completes, verify your database schema:**
 
-> **Note for Evaluators**: This repository includes pre-generated configuration files in [src/config/](src/config/) (`data_profile.json`, `keys.json`, `schema_info.json`, `schema_info.md`) for the provided challenge dataset. These files allow you to skip the interactive setup and run the application immediately. If you want to regenerate these files or use your own dataset, run `./start.sh --reset`.
+Check the generated schema documentation at [src/config/schema_info.md](src/config/schema_info.md) to see:
+- All table structures with column types
+- Primary and Foreign Key relationships
+- PII-masked columns (color-coded)
+- Sample data for each table
 
-For detailed pipeline documentation and manual setup, see the [Architecture Guide](docs/ARCHITECTURE.md#data-pipeline).
+For detailed pipeline documentation, see the [Architecture Guide](docs/ARCHITECTURE.md#data-pipeline) or [SETUP_GUIDE.md](SETUP_GUIDE.md) for step-by-step instructions.
 
 ## Running the Application
 
@@ -192,7 +196,7 @@ For detailed pipeline documentation and manual setup, see the [Architecture Guid
 
 This automatically starts both LangGraph server (port 2024) and frontend (port 3000), then opens http://localhost:3000 in your browser. On first run, it will automatically set up the database.
 
-> **Note**: Windows users should run this command in Git Bash or WSL.
+> **Note**: Windows users should run this command in Git Bash. If you encounter permission issues, run `chmod +x start.sh` first.
 
 **Reset and start fresh:**
 
@@ -202,7 +206,36 @@ This automatically starts both LangGraph server (port 2024) and frontend (port 3
 
 This drops all tables, clears config files, and re-runs the setup pipeline.
 
-For manual setup, CLI mode, and development server options, see the [Development Guide](docs/DEVELOPMENT.md#running-the-application).
+### Alternative: Manual Start (if start.sh doesn't work)
+
+If the start script fails, you can run components separately:
+
+**1. Data Setup (first time only):**
+```bash
+python src/setup.py
+```
+
+**2. CLI Mode (backend testing):**
+```bash
+python src/cli.py
+```
+
+**3. Full UI Mode:**
+
+Terminal 1 - Backend:
+```bash
+conda activate cadet
+langgraph dev
+```
+
+Terminal 2 - Frontend:
+```bash
+conda activate cadet
+cd frontend
+pnpm dev
+```
+
+Then open http://localhost:3000 in your browser.
 
 ## Example Queries
 
@@ -244,22 +277,20 @@ This will drop all database tables, delete config files, and re-run the entire p
 
 ### Common Issues
 
-- **Schema not found**: Run `python src/setup.py`
+- **Schema not found**: Run `python src/setup.py` or `./start.sh --reset`
 - **Database connection error**: Check if PostgreSQL is running with `docker-compose ps`
-- **Port conflict**: Edit `langgraph.json` to use a different port
-- **Permission denied (./start.sh)**: Run `chmod +x start.sh` first (Mac/Linux/Git Bash only)
-- **Module not found errors**: Make sure you've installed all dependencies with `pip install -r requirements.txt`
-- **Windows issues**: Ensure you're using Git Bash or WSL, not CMD or PowerShell
-
-For detailed troubleshooting, see the [Development Guide](docs/DEVELOPMENT.md#troubleshooting).
+- **Port conflict**: Edit `langgraph.json` to use a different port, or for frontend use `PORT=3001` before `pnpm dev`
+- **Permission denied (./start.sh)**: Run `chmod +x start.sh` first
+- **Module not found errors**: Make sure you've installed all dependencies with `pip install -r requirements.txt` in activated conda environment
+- **Windows issues**: Ensure you're using Git Bash with Conda activated. Try running components separately (see Alternative: Manual Start above)
 
 ## Documentation
 
-For detailed system documentation and developer guides, see the [docs/](docs/) folder:
+For detailed system documentation, see the [docs/](docs/) folder:
 
 - **[Architecture Guide](docs/ARCHITECTURE.md)** - System design, LangGraph workflow, project structure, and component details
 - **[Error Handling Guide](docs/ERROR-HANDLING.md)** - SQL validation, error types, retry mechanism, and debugging
-- **[Development Guide](docs/DEVELOPMENT.md)** - Development setup, contributing, testing, limitations, and roadmap
+- **[Setup Guide](SETUP_GUIDE.md)** - Step-by-step interactive data pipeline setup
 
 ---
 

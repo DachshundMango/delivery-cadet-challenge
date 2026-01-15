@@ -153,7 +153,6 @@ cadet/
 │
 ├── docs/                         # Documentation
 │   ├── ERROR-HANDLING.md         # Error handling & retry logic
-│   ├── DEVELOPMENT.md            # Development guide & contributing
 │   └── ARCHITECTURE.md           # This file
 │
 ├── tests/                        # Testing (672 LOC)
@@ -868,7 +867,7 @@ state['pyodide_fallback_attempted'] = True  # Prevent infinite loop
 
 ### Why Cerebras (llama-3.3-70b)?
 
-- **Performance:** Fast inference (previously Groq)
+- **Performance:** Fast inference with low latency
 - **OpenAI-compatible API:** Easy integration
 - **Cost-effective:** Competitive pricing
 
@@ -908,14 +907,28 @@ This drops all tables, clears config files, and re-runs the setup pipeline.
 
 > **📚 For detailed setup instructions, see [SETUP_GUIDE.md](../SETUP_GUIDE.md)** - includes exact inputs needed for the provided dataset (approximately 5 minutes).
 
+### Verify Database Schema
+
+After the pipeline completes, review the generated schema documentation:
+
+**Check [src/config/schema_info.md](../src/config/schema_info.md):**
+- All table structures with column types
+- Primary and Foreign Key relationships
+- PII-masked columns (color-coded in report)
+- Sample data for each table
+
+This human-readable report lets you verify that:
+- Primary/Foreign Keys are correctly configured
+- Data transformations were applied successfully
+- PII detection identified the right columns
+
 ---
 
 ## Related Documentation
 
 - [Error Handling Guide](ERROR-HANDLING.md) - SQL validation, retry logic, debugging
-- [Development Guide](DEVELOPMENT.md) - Contributing and extending
 - [Setup Guide](../SETUP_GUIDE.md) - Interactive data pipeline setup guide
-- README.md - User setup and usage
+- [README](../README.md) - User setup and usage
 
 ---
 

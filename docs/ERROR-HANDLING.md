@@ -1,363 +1,406 @@
 # Error Handling & SQL Validation
 
-This document explains how Delivery Cadet handles SQL validation errors, the retry mechanism, and how to debug validation failures.
+This document explains how Delivery Cadet handles SQL validation errors, the retry mechanism with intelligent error feedback, and the Pyodide fallback strategy.
 
 ## Table of Contents
-- [Overview](#overview)
-- [SQL Validation Pipeline](#sql-validation-pipeline)
-- [Error Types](#error-types)
-- [Retry Mechanism](#retry-mechanism)
-- [Recent Improvements](#recent-improvements)
+- [Error Handling Philosophy](#error-handling-philosophy)
+- [SQL Retry Mechanism](#sql-retry-mechanism)
+- [Error Feedback System Architecture](#error-feedback-system-architecture)
+- [Pyodide Fallback](#pyodide-fallback)
+- [Security Guardrails](#security-guardrails)
+- [Error Types Reference](#error-types-reference)
 - [Debugging Guide](#debugging-guide)
-- [Common Issues](#common-issues)
+- [Reference Architecture Summary](#reference-architecture-summary)
 
 ---
 
-## Overview
+## Error Handling Philosophy
 
-Delivery Cadet uses a multi-layered approach to ensure SQL queries are safe and valid before execution:
+Delivery Cadet is designed with **self-correction** at its core. When SQL generation or execution fails, the system doesn't simply return an error to the user—it analyses the failure, generates targeted feedback, and retries with specific guidance for the LLM.
 
-1. **LLM generates SQL** from natural language
-2. **Validation layer** checks for safety and correctness
-3. **If validation fails**, error is stored and passed to retry logic
-4. **LLM receives error hints** and regenerates SQL (up to 3 attempts)
-5. **Execute validated query** against PostgreSQL
+**Key principles:**
+- **Fail gracefully**: Errors are opportunities for correction, not termination points
+- **Targeted feedback**: Each error type receives specific corrective guidance (not generic "try again" messages)
+- **Fallback strategy**: When SQL approaches fail after 3 attempts, the system pivots to a simpler SQL + Python analysis approach
+- **Security first**: All queries pass through validation before execution, regardless of retry count
 
-This document focuses on steps 2-4: validation, error handling, and retry logic.
+This creates a resilient system that can handle ambiguous questions, correct its own mistakes, and still provide accurate answers even when the initial approach fails.
 
----
+## SQL Retry Mechanism
 
-## SQL Validation Pipeline
+### Overview
 
-### Location
-[src/core/validation.py](../src/core/validation.py) - `validate_sql_query()`
+When SQL generation or execution fails, Delivery Cadet automatically retries up to **3 times** with progressively refined guidance. This retry mechanism is orchestrated across multiple modules working in concert.
 
-### Validation Steps
-
-#### 1. Safety Checks
-Prevents SQL injection and dangerous operations:
-
-```python
-# Forbidden keywords
-dangerous_keywords = {
-    'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER',
-    'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
-}
-```
-
-**Error:** `"Forbidden SQL keyword: {keyword}"`
-
-#### 2. Multiple Statement Prevention
-Blocks queries with multiple statements (SQL injection vector):
-
-```python
-if ';' in sql_stripped:
-    raise SQLGenerationError("Multiple SQL statements not allowed")
-```
-
-**Error:** `"Multiple SQL statements not allowed"`
-
-#### 3. Comment Blocking
-Prevents comments that could hide malicious code:
-
-```python
-if '--' in sql_query or '/*' in sql_query:
-    raise SQLGenerationError("SQL comments not allowed")
-```
-
-**Error:** `"SQL comments not allowed"`
-
-#### 4. Table Name Validation
-Ensures all table references exist in the schema:
-
-**Process:**
-1. Extract CTE names (e.g., `WITH customer_data AS (...)`)
-2. Extract subquery aliases (e.g., `FROM (SELECT ...) AS temp`)
-3. Extract all table names from `FROM` and `JOIN` clauses
-4. Filter out CTEs and subquery aliases
-5. Check remaining tables against allowed schema tables
-
-**Error:** `"Unknown tables in query: {invalid_tables}"`
-
----
-
-## Error Types
-
-### 1. Unknown Tables Error
-
-**Example:**
-```
-Error: Unknown tables in query: {'it'}
-```
-
-**Causes:**
-- LLM invents non-existent table names
-- LLM uses abbreviations (e.g., `'it'` instead of `'items'`)
-- CTE defined but referenced with wrong name
-- Parsing failure (CTE not detected)
-
-**LLM Hint (Short names ≤2 chars):**
-```
-Your previous attempt used a subquery with alias {'it'}, which caused a validation error.
-ALWAYS use CTE (WITH clause) instead of subqueries in FROM clause.
-Example: WITH ranked AS (SELECT ... RANK() OVER (...) FROM ...) SELECT * FROM ranked WHERE rank = 1
-```
-
-**LLM Hint (Long names):**
-```
-Your previous attempt used invalid table(s): {'unknown_table'}
-These tables DO NOT EXIST in the schema.
-Use ONLY these exact table names: customers, orders, products, ...
-Do NOT abbreviate or invent table names.
-```
-
-### 2. Multiple Statements Error
-
-**Example:**
-```
-Error: Multiple SQL statements not allowed
-```
-
-**Cause:**
-LLM generated multiple queries separated by semicolons:
-```sql
-CREATE TEMP TABLE temp AS (...);
-SELECT * FROM temp;
-```
-
-**LLM Hint:**
-```
-Your previous attempt had multiple SQL statements (separated by semicolons).
-Generate EXACTLY ONE query. Use CTE (WITH clause) for multi-step logic:
-WITH temp AS (SELECT ...) SELECT ... FROM temp
-```
-
-### 3. SQL Comments Error
-
-**Example:**
-```
-Error: SQL comments not allowed
-```
-
-**Cause:**
-LLM included comments in SQL:
-```sql
-SELECT * FROM orders -- Get all orders
-WHERE status = 'active'
-```
-
-**LLM Hint:**
-```
-Your previous attempt had SQL comments (-- or /* */).
-Remove ALL comments. Return ONLY the SQL query with no explanations.
-```
-
-### 4. Column Does Not Exist
-
-**Example:**
-```
-Error: column "customername" does not exist
-```
-
-**Cause:**
-PostgreSQL is case-sensitive. Unquoted column names are lowercased:
-```sql
--- Wrong
-SELECT customerName FROM customers
-
--- Correct
-SELECT "customerName" FROM customers
-```
-
-**LLM Hint:**
-```
-Your previous attempt referenced a non-existent column.
-Remember: PostgreSQL converts unquoted column names to lowercase.
-ALWAYS use double quotes: t."columnName" not t.columnName
-```
-
-### 5. Forbidden Keyword Error
-
-**Example:**
-```
-Error: Forbidden SQL keyword: CREATE
-```
-
-**Cause:**
-LLM tried to create temporary tables:
-```sql
-CREATE TEMP TABLE temp AS (...)
-```
-
-**LLM Hint:**
-```
-Your previous attempt used CREATE TEMP TABLE.
-Use CTE (WITH clause) instead: WITH temp AS (SELECT ...) SELECT ... FROM temp
-```
-
----
-
-## Retry Mechanism
-
-### Maximum Retries
-`MAX_SQL_RETRIES = 3` ([src/agent/graph.py:17](../src/agent/graph.py#L17))
-
-### Workflow
+### Retry Flow
 
 ```
 User Question
     ↓
 generate_SQL (LLM generates SQL)
     ↓
-validate_sql_query()
+validate_sql_query() — Module: src/core/validation.py
     ↓
-┌─ Validation PASS → execute_SQL → Success
-│
-└─ Validation FAIL → Error stored in query_result
-                         ↓
-                     execute_SQL (skips execution)
-                         ↓
-                     check_query_validation (detects error)
-                         ↓
-                     ┌─ retry_count < 3 → generate_SQL (with hints)
-                     │
-                     └─ retry_count >= 3 → Return error message
+    ├─ PASS → execute_SQL → Success
+    │
+    └─ FAIL → Store error in state['query_result']
+              Increment state['sql_retry_count']
+                  ↓
+              execute_SQL (skips execution)
+                  ↓
+              decide_sql_retry_route() — Module: src/agent/routing.py
+                  ↓
+                  ├─ retry_count < 3 → generate_SQL (with error feedback)
+                  │                        ↑
+                  │                        │
+                  │         get_sql_error_feedback() — Module: src/agent/error_feedback.py
+                  │                        │
+                  │                 Analyses error pattern
+                  │                        │
+                  │            Routes to specific feedback template
+                  │                        │
+                  │              feedback templates — Module: src/agent/feedbacks.py
+                  │
+                  └─ retry_count >= 3 → Check Pyodide fallback eligibility
+                                            ↓
+                                      enable_pyodide_fallback (if not attempted)
+                                            or
+                                      Return error to user (if fallback also failed)
 ```
 
 ### Retry Count Tracking
 
-**Location:** [src/agent/graph.py:36-38](../src/agent/graph.py#L36-L38)
+**Module:** `src/agent/state.py`
+
+The system uses a dedicated `sql_retry_count` state variable (not message counting) to track retry attempts. This prevents token overflow and ensures consistent retry logic:
 
 ```python
-messages = state.get('messages', [])
-error_count = sum(1 for msg in messages
-                 if 'Error:' in str(getattr(msg, 'content', '')))
+# State definition
+sql_retry_count: Optional[int]  # Incremented on each failure
 ```
 
-Errors are counted by checking messages for `"Error:"` prefix.
+**Key operations:**
+- **Increment:** When `generate_SQL` validation fails or `execute_SQL` encounters database errors
+- **Reset:** When transitioning to Pyodide fallback (fresh start with simpler approach)
+- **Check:** In `decide_sql_retry_route()` to determine whether to retry or fallback
 
-### Error Hint Generation
+### Retry Decision Logic
 
-**Location:** [src/agent/nodes.py:367-403](../src/agent/nodes.py#L367-L403)
+**Module:** `src/agent/routing.py` — Function: `decide_sql_retry_route()`
 
-When `retry_count > 0`, the system:
-1. Reads previous error from `state['query_result']`
-2. Matches error pattern (e.g., `'Unknown tables in query'`)
-3. Appends specific hint to SQL generation prompt
-4. Invokes LLM with updated prompt
+After each SQL execution attempt, the routing logic examines:
+1. **Query result status**: Does it contain "Error:"?
+2. **Retry count**: How many attempts have been made?
+3. **Fallback status**: Has Pyodide fallback already been attempted?
 
-**Example:**
+**Decision tree:**
+- Result is None → Retry immediately
+- Error present + retry_count < 3 → Retry with error feedback
+- Error present + retry_count >= 3 + no fallback yet → Enable Pyodide fallback
+- Error present + retry_count >= 3 + fallback attempted → Return error to user
+- No error → Proceed to visualisation
+
+### Error Analysis and Feedback Generation
+
+**Module:** `src/agent/error_feedback.py` — Function: `get_sql_error_feedback()`
+
+When a retry is triggered, this module:
+1. **Parses the error message** using regex patterns
+2. **Identifies error category** (unknown tables, forbidden keywords, column issues, etc.)
+3. **Routes to appropriate feedback template** from `src/agent/feedbacks.py`
+4. **Returns targeted guidance** appended to the SQL generation prompt
+
+**Example flow:**
 ```python
-if 'Unknown tables in query' in previous_error:
-    sql_prompt += "\n\n**CRITICAL FIX REQUIRED:**\n..."
+# Error: "Unknown tables in query: {'it'}"
+error_feedback.get_sql_error_feedback(error, allowed_tables)
+    ↓
+Detects: "Unknown tables in query"
+    ↓
+Checks: Is 'it' likely a subquery alias? (length <= 2 chars)
+    ↓
+Routes to: get_unknown_tables_feedback(is_likely_alias=True)
+    ↓
+Returns: "CRITICAL FIX: Always use CTE (WITH clause) instead of subqueries..."
 ```
+
+This feedback is appended to the SQL generation prompt, guiding the LLM to correct the specific issue.
+
+## Error Feedback System Architecture
+
+### Module Roles
+
+The error feedback system is split into two specialised modules for maintainability and clarity:
+
+#### 1. Error Analysis Router (`src/agent/error_feedback.py`)
+
+**Responsibility:** Analyse error messages and route to appropriate feedback generators.
+
+**Key function:** `get_sql_error_feedback(error_message, allowed_tables)`
+
+**Workflow:**
+1. Receives error message from `state['query_result']`
+2. Uses regex patterns to identify error category
+3. Extracts relevant details (e.g., invalid table names, column names)
+4. Routes to specific feedback function in `feedbacks.py`
+5. Returns formatted feedback string
+
+**Supported error categories:**
+- Unknown tables in query
+- Multiple SQL statements
+- SQL comments
+- Forbidden keywords (CREATE, DROP, etc.)
+- Column not found
+- Division by zero
+- Datetime format issues
+- Generic parsing errors (catch-all)
+
+#### 2. Feedback Templates (`src/agent/feedbacks.py`)
+
+**Responsibility:** Provide concrete correction guides for each error type.
+
+**Available templates (9+):**
+- `get_unknown_tables_feedback()` — Guides LLM to use correct table names or CTEs
+- `get_multiple_statements_feedback()` — Instructs use of CTEs instead of multiple statements
+- `get_sql_comments_feedback()` — Reminds LLM to remove comments
+- `get_forbidden_keyword_feedback()` — Suggests CTE alternative to CREATE TEMP TABLE
+- `get_column_not_found_feedback()` — Explains PostgreSQL case sensitivity
+- `get_alias_reference_feedback()` — Specific guidance for column alias issues
+- `get_parsing_error_feedback()` — Generic fallback guidance
+- `get_division_by_zero_feedback()` — Suggests NULLIF or CASE protection
+- `get_datetime_format_feedback()` — Guides proper datetime casting
+
+**Example template:**
+```python
+def get_unknown_tables_feedback(invalid_tables, allowed_tables, is_likely_alias):
+    if is_likely_alias:
+        return """
+        **CRITICAL FIX REQUIRED:**
+        Your previous attempt used a subquery with alias {invalid_tables}, which caused a validation error.
+
+        ALWAYS use CTE (WITH clause) instead of subqueries in FROM clause.
+        Example: WITH ranked AS (SELECT ... RANK() OVER (...) FROM ...) SELECT * FROM ranked WHERE rank = 1
+        """
+    else:
+        return f"""
+        **CRITICAL FIX REQUIRED:**
+        Your previous attempt used invalid table(s): {invalid_tables}
+        These tables DO NOT EXIST in the schema.
+
+        Use ONLY these exact table names: {', '.join(sorted(allowed_tables))}
+        Do NOT abbreviate or invent table names.
+        """
+```
+
+### Integration with Retry Flow
+
+**In `generate_SQL` node:**
+1. Check if `sql_retry_count > 0`
+2. If yes, call `get_sql_error_feedback(previous_error, allowed_tables)`
+3. Append returned feedback to SQL generation prompt
+4. Invoke LLM with enhanced prompt
+
+This ensures each retry attempt receives specific, actionable guidance rather than generic "try again" messages.
 
 ---
 
-## Recent Improvements
+## Pyodide Fallback
 
-### Problem (Before)
-Validation errors caused workflow termination without retry:
+### When It Activates
 
+After **3 failed SQL retry attempts**, if the question originally required SQL analysis (not general conversation), the system automatically transitions to **Pyodide fallback mode**.
+
+**Trigger conditions:**
+- `sql_retry_count >= 3`
+- `query_result` contains "Error:"
+- `pyodide_fallback_attempted == False`
+
+### Strategy
+
+Instead of attempting complex analytical SQL, the system pivots to a **two-step approach**:
+
+1. **Simple SELECT query:** Fetch raw data with minimal transformations (avoid window functions, complex aggregations, CTEs that caused failures)
+2. **Browser-side Python analysis:** Use Pyodide (Python runtime in WebAssembly) to perform pandas operations directly in the user's browser
+
+**Example scenario:**
 ```
-generate_SQL
-    ↓
-validate_sql_query() fails
-    ↓
-raise SQLGenerationError  ← Workflow stops here!
-    ↓
-🛑 Never reaches execute_SQL
-🛑 Retry logic never triggered
-🛑 User sees error, no recovery
-```
+Original question: "For each country, rank products by total revenue and show only the top-selling product"
 
-### Solution (After - 2026-01-09)
+Failed SQL approach (3 attempts):
+- Attempt 1: Window function with RANK() → Syntax error
+- Attempt 2: CTE with ROW_NUMBER() → Unknown table error
+- Attempt 3: Subquery approach → Validation failed
 
-**Change 1: Store validation errors instead of raising**
-
-[src/agent/nodes.py:432-447](../src/agent/nodes.py#L432-L447)
-
-```python
-except SQLGenerationError as e:
-    # Validation failed - store error in state for retry logic
-    error_msg = f"Error: {str(e)}"
-    logger.error(f"SQL validation failed: {e}")
-
-    # Return error in query_result so retry logic can process it
-    return {
-        "sql_query": sql_query if 'sql_query' in locals() else None,
-        "query_result": error_msg  # ← Key change!
-    }
+Pyodide fallback approach:
+- SQL: SELECT country, product, SUM(revenue) as total FROM sales GROUP BY country, product
+- Python (Pandas):
+  df.groupby('country').apply(lambda x: x.nlargest(1, 'total')).reset_index(drop=True)
 ```
 
-**Change 2: Skip execution if error already present**
+### Implementation
 
-[src/agent/nodes.py:470-474](../src/agent/nodes.py#L470-L474)
+**Module:** `src/agent/nodes.py` — Function: `enable_pyodide_fallback()`
 
-```python
-# If query_result already has an error (from validation failure), pass it through
-query_result = state.get('query_result')
-if query_result and 'Error:' in query_result:
-    logger.info("Skipping execution - validation error already in query_result")
-    return {}  # Don't overwrite query_result, just pass through
-```
+**Workflow:**
+1. Sets `needs_pyodide = True` in state
+2. Sets `pyodide_fallback_attempted = True` to prevent loops
+3. Clears previous error state (`query_result = None`, `sql_query = None`)
+4. Resets `sql_retry_count = 0` for fresh attempt
+5. Returns to `generate_SQL` with Pyodide mode enabled
 
-**Change 3: Enhanced debug logging**
+**Result:**
+- LLM generates simpler SQL focused on data retrieval
+- `generate_pyodide_analysis` node creates pandas code for analysis
+- Pyodide executes Python code in browser, returns final result
 
-[src/core/validation.py:296-305](../src/core/validation.py#L296-L305)
+### Preventing Infinite Loops
 
-```python
-if invalid_tables:
-    logger.error(f"=== SQL Validation Failed ===")
-    logger.error(f"Invalid tables: {invalid_tables}")
-    logger.error(f"CTE names found: {cte_names}")
-    logger.error(f"Subquery aliases found: {subquery_aliases}")
-    logger.error(f"All extracted tables: {query_tables}")
-    logger.error(f"Actual tables (after filtering): {actual_tables}")
-    logger.error(f"Allowed tables: {sorted(allowed_tables)}")
-    logger.error(f"SQL query:\n{sql_query}")
-    logger.error(f"===========================")
-```
-
-### Impact
-- ✅ Validation errors now trigger retry (up to 3 attempts)
-- ✅ LLM receives error-specific hints
-- ✅ Detailed logs for debugging
-- ✅ User gets answer after retry (instead of error)
-
-### Removed: Fuzzy Matching
-
-**Previous behavior** ([validation.py:279-289](../src/core/validation.py#L279-L289)):
-```python
-# Fuzzy check: if table is a prefix of any CTE name
-for cte in cte_names:
-    if table in cte or cte in table:
-        is_cte_variant = True
-```
-
-**Problem:**
-- False positives: `'it' in 'website'` → True (unintended match)
-- Masked real issues: CTE parsing failures not detected
-- Inconsistent: Substring matching instead of prefix matching
-
-**Solution:**
-Removed fuzzy matching (commented out). Now uses exact matching only:
-```python
-if table in cte_names or table in subquery_aliases:
-    continue  # Only exact matches filtered
-```
-
-This makes validation stricter but more predictable. If LLM uses wrong CTE name, it fails validation → retry with hint → LLM corrects it.
+The `pyodide_fallback_attempted` flag ensures the system doesn't retry indefinitely:
+- If Pyodide approach also fails after retries → System returns error to user
+- No further fallback attempts beyond Pyodide
 
 ---
+
+## Security Guardrails
+
+### Validation Layer
+
+**Module:** `src/core/validation.py` — Function: `validate_sql_query()`
+
+All SQL queries pass through security validation **before execution**, regardless of whether it's the first attempt or a retry. This ensures compromised or malicious queries cannot reach the database.
+
+### Four-Layer Security
+
+#### 1. Forbidden Keyword Detection
+
+Blocks dangerous SQL operations:
+```python
+dangerous_keywords = {
+    'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER',
+    'TRUNCATE', 'CREATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'
+}
+```
+
+**Raises:** `SQLGenerationError("Forbidden SQL keyword: {keyword}")`
+
+#### 2. Multiple Statement Prevention
+
+Prevents SQL injection via statement chaining:
+- Strips trailing semicolon (allowed)
+- Checks for additional semicolons in query body
+- Rejects queries with multiple statements
+
+**Raises:** `SQLGenerationError("Multiple SQL statements not allowed")`
+
+#### 3. Comment Blocking
+
+Prevents comments that could hide malicious code:
+- Blocks `--` (single-line comments)
+- Blocks `/* */` (multi-line comments)
+
+**Raises:** `SQLGenerationError("SQL comments not allowed")`
+
+#### 4. Table Whitelist Validation
+
+Ensures all table references exist in the schema:
+
+**Process:**
+1. Extract CTE names using regex: `WITH <name> AS (`
+2. Extract subquery aliases using `sqlparse` AST traversal
+3. Extract all table names from `FROM` and `JOIN` clauses
+4. Filter out CTEs and subquery aliases (temporary, not schema tables)
+5. Validate remaining tables against allowed schema tables
+
+**Raises:** `SQLGenerationError("Unknown tables in query: {invalid_tables}")`
+
+### Impact on Retry Logic
+
+When validation fails:
+- Error is **stored** in `state['query_result']` (not raised immediately)
+- `sql_retry_count` is incremented
+- Execution is skipped (`execute_SQL` detects error and passes through)
+- Retry logic triggers with targeted feedback
+
+This ensures security checks remain active while allowing self-correction.
+
+---
+
+## Error Types Reference
+
+This section provides a quick reference for common error patterns. For detailed feedback logic, see `src/agent/feedbacks.py`.
+
+### 1. Unknown Tables Error
+
+**Error message:** `"Unknown tables in query: {'table_name'}"`
+
+**Common causes:**
+- LLM invents non-existent table names
+- Uses abbreviations (e.g., `'it'` instead of `'items'`)
+- CTE defined but referenced with wrong name
+- Short aliases from subqueries (e.g., `'t'`, `'x'`)
+
+**System response:**
+- If table name ≤2 chars → Assumes subquery alias issue → Instructs use of CTE
+- Otherwise → Provides list of valid table names from schema
+
+### 2. Multiple Statements Error
+
+**Error message:** `"Multiple SQL statements not allowed"`
+
+**Cause:** LLM generated multiple queries separated by semicolons
+
+**System response:** Instructs use of CTE (WITH clause) for multi-step logic
+
+### 3. SQL Comments Error
+
+**Error message:** `"SQL comments not allowed"`
+
+**Cause:** LLM included `--` or `/* */` comments in query
+
+**System response:** Reminds to return only SQL with no explanations
+
+### 4. Column Does Not Exist
+
+**Error message:** `"column 'columnname' does not exist"`
+
+**Cause:** PostgreSQL case sensitivity—unquoted column names are lowercased
+
+**System response:** Instructs use of double quotes for case-sensitive columns: `"columnName"`
+
+### 5. Forbidden Keyword Error
+
+**Error message:** `"Forbidden SQL keyword: CREATE"`
+
+**Cause:** LLM attempted to use CREATE TEMP TABLE or other dangerous operations
+
+**System response:** Suggests CTE alternative
+
+### 6. Division by Zero
+
+**Error message:** Contains `"division by zero"`
+
+**System response:** Suggests NULLIF or CASE protection around division operations
+
+### 7. Datetime Format Issues
+
+**Error message:** Contains `"datetime"` and `"format"`
+
+**System response:** Guides proper datetime casting and format strings
+
+### 8. Parsing Errors
+
+**Catch-all category** for syntax errors not matching specific patterns
+
+**System response:** Generic guidance to review SQL syntax and structure
 
 ## Debugging Guide
 
-### Step 1: Check Logs
+### Log Analysis
 
-**Log file:** `log.txt` (root directory)
+**Primary log file:** `log.txt` (root directory)
 
-**Look for validation failures:**
+The validation module (`src/core/validation.py`) logs detailed debugging information when validation fails. Look for the banner:
+
 ```bash
 grep "=== SQL Validation Failed ===" log.txt -A 10
 ```
@@ -372,26 +415,22 @@ All extracted tables: {'sales_orders', 'it'}
 Actual tables (after filtering): {'it'}
 Allowed tables: ['customers', 'orders', 'products', 'sales_orders']
 SQL query:
-SELECT "item", SUM("amount") as total
-FROM sales_orders
-WHERE "region" = 'North'
-GROUP BY "item"
-ORDER BY total DESC
-LIMIT 5
+SELECT "item", SUM("amount") as total FROM sales_orders
 ===========================
 ```
 
-### Step 2: Analyze the Error
+### Diagnostic Questions
 
-**Questions to ask:**
-1. **Is the invalid table a typo?** (e.g., `'oder'` instead of `'orders'`)
-2. **Is it a CTE?** Check if CTE names are empty but query has `WITH` clause
-3. **Is it a short alias?** (e.g., `'it'`, `'t'`, `'x'`) → Likely subquery issue
-4. **Does it match a real table?** (e.g., `'customer'` vs `'customers'`)
+When analysing a validation failure:
 
-### Step 3: Test CTE Extraction
+1. **Is it a typo?** Compare invalid table name with allowed tables list
+2. **Is it a CTE?** If query has `WITH` clause but CTE names are empty → Regex parsing issue
+3. **Is it a short alias?** Names ≤2 chars (`'it'`, `'t'`) → Likely subquery without CTE
+4. **Case mismatch?** PostgreSQL lowercases unquoted identifiers
 
-**Run in Python console:**
+### Testing Validation Components
+
+**Test CTE extraction:**
 ```python
 from src.core.validation import _extract_cte_names
 
@@ -408,23 +447,18 @@ cte_names = _extract_cte_names(sql)
 print(cte_names)  # Should be: {'item_totals'}
 ```
 
-If empty set but CTE exists → regex pattern issue.
+If empty set but CTE exists → Check regex pattern in `_extract_cte_names()`.
 
-### Step 4: Check sqlparse Output
-
+**Test subquery alias extraction:**
 ```python
-import sqlparse
-from src.core.validation import _extract_table_names
+from src.core.validation import _extract_subquery_aliases
 
-sql = "SELECT * FROM (SELECT ...) AS temp"
-parsed = sqlparse.parse(sql)[0]
-
-tables = _extract_table_names(parsed)
-print(tables)  # Check if 'temp' is included
+sql = "SELECT * FROM (SELECT id FROM orders) AS order_subset"
+aliases = _extract_subquery_aliases(sql)
+print(aliases)  # Should include: {'order_subset'}
 ```
 
-### Step 5: Manual Validation Test
-
+**Manual validation test:**
 ```python
 from src.core.validation import validate_sql_query
 
@@ -437,117 +471,118 @@ except Exception as e:
     print(f"Error: {e}")
 ```
 
----
+### Tracking Retry Attempts
 
-## Common Issues
+Search logs for retry indicators:
 
-### Issue 1: "Unknown tables: {'it'}"
-
-**Root cause:**
-LLM generated table name/alias 'it' without defining it as a CTE or using a real table.
-
-**Possible queries:**
-```sql
--- Case 1: No CTE definition
-SELECT * FROM it  -- ❌ Where is 'it' defined?
-
--- Case 2: CTE name mismatch
-WITH item_totals AS (...)
-SELECT * FROM it  -- ❌ Should be 'item_totals'
-
--- Case 3: Parsing failure
-WITH it AS (...)
-SELECT * FROM it  -- ✅ Should work, but regex might fail
-```
-
-**Solution:**
-1. Check logs for actual SQL query
-2. If CTE exists but not detected → fix `_extract_cte_names()` regex
-3. If no CTE → LLM error, retry will fix it
-
-### Issue 2: Validation passes but execution fails
-
-**Symptom:**
-```
-logger.info("SQL validation passed")
-...
-Error: column "customerName" does not exist
-```
-
-**Cause:**
-Validation only checks table names, not column names. PostgreSQL validates columns at execution time.
-
-**Solution:**
-This is expected behavior. Column errors trigger retry through `execute_SQL` error handling.
-
-### Issue 3: Retry not working
-
-**Symptom:**
-Validation error shown to user, no retry attempted.
-
-**Check:**
-1. Is error in `query_result`? (Should be after 2026-01-09 update)
-2. Is `check_query_validation` being called?
-3. Is retry count already at max (3)?
-
-**Debug:**
 ```bash
 grep "Retry" log.txt
-# Should see: "Retry 1/3", "Retry 2/3", etc.
+# Expected output: "Retry 1: Added specific feedback for error type"
 ```
 
-### Issue 4: CTE not detected
-
-**Symptom:**
-```
-CTE names found: set()
-SQL query:
-WITH customer_data AS (...)
+```bash
+grep "sql_retry_count" log.txt
+# Shows retry counter increments
 ```
 
-**Cause:**
-Regex pattern `r'\b(\w+)\s+AS\s*\('` doesn't match the SQL format.
+### Common Debugging Scenarios
 
-**Possible reasons:**
-- Extra spaces/newlines: `WITH\n    customer_data\nAS (`
-- Comments: `WITH /* temp */ customer_data AS (`
-- Lowercase 'as': Pattern is case-insensitive, so should work
+**Scenario 1: Validation passes but execution fails**
 
-**Test regex:**
-```python
-import re
-sql = "WITH customer_data AS (SELECT ...)"
-matches = re.findall(r'\b(\w+)\s+AS\s*\(', sql, re.IGNORECASE)
-print(matches)  # Should be: ['customer_data']
+This is expected—validation only checks table names and safety. Column errors are caught at execution time and trigger retry with column-specific feedback.
+
+**Scenario 2: Retry not triggered**
+
+Check if:
+- Error is stored in `query_result` state (not raised immediately)
+- `sql_retry_count` is incrementing
+- Retry count hasn't exceeded 3
+
+**Scenario 3: CTE not detected**
+
+Possible causes:
+- Extra whitespace: `WITH\n    name\nAS (`
+- SQL comments interfering with regex
+- Test the CTE extraction function directly (see above)
+
+**Scenario 4: Pyodide fallback not activating**
+
+Verify:
+- `sql_retry_count >= 3`
+- `pyodide_fallback_attempted == False`
+- Original intent was 'sql' (not 'general')
+
+## Reference Architecture Summary
+
+### Module Breakdown
+
+**Core workflow orchestration:**
+- `src/agent/graph.py` — Defines the StateGraph workflow, nodes, and conditional edges
+- `src/agent/state.py` — State schema including `sql_retry_count` and `pyodide_fallback_attempted`
+- `src/agent/config.py` — Configuration constants including `MAX_SQL_RETRIES = 3`
+
+**Node implementations:**
+- `src/agent/nodes.py` — All workflow nodes:
+  - `generate_SQL()` — LLM SQL generation with retry feedback integration
+  - `execute_SQL()` — Query execution with error detection
+  - `enable_pyodide_fallback()` — Fallback mode activation
+  - Other nodes (intent classification, visualisation, response generation)
+
+**Routing logic:**
+- `src/agent/routing.py` — Contains `RouteDecider` class:
+  - `decide_sql_retry_route()` — Determines retry vs. fallback vs. success
+  - Other routing decisions (intent, visualisation, pyodide)
+
+**Error feedback system:**
+- `src/agent/error_feedback.py` — Error analysis router:
+  - `get_sql_error_feedback()` — Analyses error messages and routes to appropriate feedback
+- `src/agent/feedbacks.py` — Feedback template library:
+  - 9+ specialised feedback generators for different error types
+  - Returns formatted strings appended to SQL prompts
+
+**Validation and security:**
+- `src/core/validation.py` — SQL validation functions:
+  - `validate_sql_query()` — Four-layer security validation
+  - `_extract_cte_names()` — CTE name extraction via regex
+  - `_extract_subquery_aliases()` — Subquery alias extraction via sqlparse
+  - `_extract_table_names()` — Table name extraction from parsed SQL
+
+**Error definitions:**
+- `src/core/errors.py` — Custom exception classes:
+  - `SQLGenerationError` — Raised for validation failures
+  - `ValidationError` — Raised for input validation issues
+
+### Key Workflow Paths
+
+**Success path:**
+```
+generate_SQL → validate (pass) → execute_SQL → visualisation → response
 ```
 
----
+**Retry path:**
+```
+generate_SQL → validate (fail) → execute_SQL (skip) → routing (retry)
+  ↓
+generate_SQL (with feedback from error_feedback.py) → retry up to 3 times
+```
 
-## Best Practices
-
-### 1. Always Check Logs First
-Don't guess - look at the actual SQL query in `log.txt`.
-
-### 2. Test Validation Locally
-Before deploying validation changes, test with real queries from logs.
-
-### 3. Update Retry Hints
-When adding new validation rules, update hint generation in `nodes.py:generate_SQL`.
-
-### 4. Monitor Retry Success Rate
-Track how often retries succeed vs. fail (metrics idea for future).
-
-### 5. Keep Validation Strict
-Don't add fuzzy matching to "help" the LLM - it masks real issues. Let retry mechanism fix errors.
+**Fallback path:**
+```
+generate_SQL → validate (fail) → ... → retry 3 times (all fail)
+  ↓
+routing (fallback) → enable_pyodide_fallback
+  ↓
+generate_SQL (simple mode) → execute_SQL → generate_pyodide_analysis → response
+```
 
 ---
 
 ## Related Documentation
 
-- [Architecture Guide](ARCHITECTURE.md) - System design and workflow
+- [Architecture Guide](ARCHITECTURE.md) - Complete system design and LangGraph workflow
 - [Setup Guide](../SETUP_GUIDE.md) - Interactive data pipeline setup guide
-- [README](../README.md) - User setup and usage
+- [README](../README.md) - Installation, setup, and usage
 
 ---
 
-**Last Updated:** 2026-01-11
+**Last Updated:** 2026-01-15

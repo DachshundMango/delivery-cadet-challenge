@@ -39,11 +39,11 @@ Before writing the query, think through:
 **CRITICAL RULES:**
 
 1. **Use EXACT table names from schema** - Never abbreviate or invent
-   ✓ FROM orders o (exact + alias)
-   ✗ FROM ord (no abbreviation)
+   ✓ FROM transactions t (exact + alias)
+   ✗ FROM trans (no abbreviation)
 
-2. **Table aliases ALLOWED** - Use short aliases (o, u, t) for readability
-   ✓ FROM orders o JOIN users u ON o."user_id" = u."id"
+2. **Table aliases ALLOWED** - Use short aliases (t, e, r) for readability
+   ✓ FROM transactions t JOIN entities e ON t."entity_id" = e."id"
 
 3. **Quote ALL columns** - PostgreSQL case-sensitive: t."columnName"
 
@@ -55,13 +55,13 @@ Before writing the query, think through:
 
 6. **Query complexity:**
    a) **Simple "top N" globally**: ORDER BY + LIMIT
-      "Show top 10 items" → SELECT "item", SUM("amount") FROM orders GROUP BY "item" ORDER BY SUM("amount") DESC LIMIT 10
+      "Show top 10 items" → SELECT "item", SUM("amount") FROM fact_table GROUP BY "item" ORDER BY SUM("amount") DESC LIMIT 10
 
    b) **Ranking per group**: PARTITION BY + window functions
       "Show top item PER REGION" → WITH ranked AS (SELECT "region", "item", RANK() OVER (PARTITION BY "region" ORDER BY SUM("amount") DESC) ...) SELECT * FROM ranked WHERE rank = 1
 
    c) **Running totals**: SUM() OVER (ORDER BY ...)
-      "Cumulative total per day" → SELECT "date", SUM("amount"), SUM(SUM("amount")) OVER (ORDER BY "date") as cumulative FROM orders GROUP BY "date"
+      "Cumulative total per day" → SELECT "date", SUM("amount"), SUM(SUM("amount")) OVER (ORDER BY "date") as cumulative FROM fact_table GROUP BY "date"
 
    d) **Multi-step logic**: CTE (WITH clause)
       WITH temp AS (SELECT ...) SELECT * FROM temp
@@ -87,17 +87,17 @@ Then, provide ONLY the SQL query inside <sql> tags.
 
 Example:
 <reasoning>
-Tables: "users", "orders"
-Joins: users.id = orders.user_id
-Aggregation: SUM by user
+Tables: "entities", "transactions"
+Joins: entities.id = transactions.entity_id
+Aggregation: SUM by entity
 Structure: Simple GROUP BY with ORDER BY LIMIT
 </reasoning>
 
 <sql>
-SELECT u."name", SUM(o."amount") as total
-FROM "users" u
-JOIN "orders" o ON u."id" = o."user_id"
-GROUP BY u."name"
+SELECT e."name", SUM(t."amount") as total
+FROM "entities" e
+JOIN "transactions" t ON e."id" = t."entity_id"
+GROUP BY e."name"
 ORDER BY total DESC
 LIMIT 10
 </sql>

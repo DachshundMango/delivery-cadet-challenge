@@ -36,8 +36,8 @@ ALWAYS use CTE (WITH clause) instead of subqueries in FROM clause.
 
 Example:
 WITH ranked AS (
-    SELECT *, RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS rank
-    FROM sales_orders
+    SELECT *, RANK() OVER (PARTITION BY "category" ORDER BY "value" DESC) AS rank
+    FROM data_table
 )
 SELECT * FROM ranked WHERE rank = 1
 
@@ -79,13 +79,13 @@ Generate EXACTLY ONE query. Use CTE (WITH clause) for multi-step logic:
 
 Example:
 WITH temp AS (
-    SELECT "customer_id", SUM("amount") as total
-    FROM orders
-    GROUP BY "customer_id"
+    SELECT "entity_id", SUM("amount") as total
+    FROM transactions
+    GROUP BY "entity_id"
 )
-SELECT c."name", t.total
-FROM customers c
-JOIN temp t ON c."id" = t."customer_id"
+SELECT e."name", t.total
+FROM entities e
+JOIN temp t ON e."id" = t."entity_id"
 
 Do NOT use:
 CREATE TEMP TABLE temp AS (...);
@@ -136,11 +136,11 @@ Use CTE (WITH clause) instead:
 
 Example:
 WITH temp AS (
-    SELECT "product_id", COUNT(*) as order_count
-    FROM orders
-    GROUP BY "product_id"
+    SELECT "item_id", COUNT(*) as record_count
+    FROM transactions
+    GROUP BY "item_id"
 )
-SELECT * FROM temp WHERE order_count > 10
+SELECT * FROM temp WHERE record_count > 10
 
 CTEs are temporary and automatically cleaned up after the query.
 """
@@ -194,9 +194,9 @@ PostgreSQL column name rules:
 4. Check the schema for exact column names and quote them correctly.
 
 Example:
-SELECT o."orderID", c."customerName", o."totalAmount"
-FROM orders o
-JOIN customers c ON o."customerID" = c."id"
+SELECT t."recordID", e."entityName", t."totalAmount"
+FROM transactions t
+JOIN entities e ON t."entityID" = e."id"
 """
 
 
